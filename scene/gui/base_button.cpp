@@ -98,17 +98,14 @@ void BaseButton::_notification(int p_what) {
 	}
 
 	if (p_what == NOTIFICATION_FOCUS_ENTER) {
-		status.hovering = true;
 		update();
 	}
 
 	if (p_what == NOTIFICATION_FOCUS_EXIT) {
 		if (status.press_attempt) {
 			status.press_attempt = false;
-			status.hovering = false;
 			update();
 		} else if (status.hovering) {
-			status.hovering = false;
 			update();
 		}
 	}
@@ -155,6 +152,9 @@ void BaseButton::on_action_event(Ref<InputEvent> p_event) {
 				}
 				status.pressed = !status.pressed;
 				_unpress_group();
+				if (button_group.is_valid()) {
+					button_group->emit_signal("pressed", this);
+				}
 				_toggled(status.pressed);
 				_pressed();
 			}
@@ -172,10 +172,9 @@ void BaseButton::on_action_event(Ref<InputEvent> p_event) {
 				status.hovering = false;
 			}
 		}
-		// pressed state should be correct with button_up signal
-		emit_signal("button_up");
 		status.press_attempt = false;
 		status.pressing_inside = false;
+		emit_signal("button_up");
 	}
 
 	update();
@@ -218,8 +217,23 @@ void BaseButton::set_pressed(bool p_pressed) {
 
 	if (p_pressed) {
 		_unpress_group();
+		if (button_group.is_valid()) {
+			button_group->emit_signal("pressed", this);
+		}
 	}
 	_toggled(status.pressed);
+
+	update();
+}
+
+void BaseButton::set_pressed_no_signal(bool p_pressed) {
+	if (!toggle_mode) {
+		return;
+	}
+	if (status.pressed == p_pressed) {
+		return;
+	}
+	status.pressed = p_pressed;
 
 	update();
 }
@@ -389,7 +403,7 @@ bool BaseButton::_is_focus_owner_in_shorcut_context() const {
 	Control *vp_focus = get_focus_owner();
 
 	// If the context is valid and the viewport focus is valid, check if the context is the focus or is a parent of it.
-	return ctx_node && vp_focus && (ctx_node == vp_focus || ctx_node->is_a_parent_of(vp_focus));
+	return ctx_node && vp_focus && (ctx_node == vp_focus || ctx_node->is_ancestor_of(vp_focus));
 }
 
 void BaseButton::_bind_methods() {
@@ -397,6 +411,7 @@ void BaseButton::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_unhandled_key_input"), &BaseButton::_unhandled_key_input);
 	ClassDB::bind_method(D_METHOD("set_pressed", "pressed"), &BaseButton::set_pressed);
 	ClassDB::bind_method(D_METHOD("is_pressed"), &BaseButton::is_pressed);
+	ClassDB::bind_method(D_METHOD("set_pressed_no_signal", "pressed"), &BaseButton::set_pressed_no_signal);
 	ClassDB::bind_method(D_METHOD("is_hovered"), &BaseButton::is_hovered);
 	ClassDB::bind_method(D_METHOD("set_toggle_mode", "enabled"), &BaseButton::set_toggle_mode);
 	ClassDB::bind_method(D_METHOD("is_toggle_mode"), &BaseButton::is_toggle_mode);
@@ -487,6 +502,7 @@ BaseButton *ButtonGroup::get_pressed_button() {
 void ButtonGroup::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_pressed_button"), &ButtonGroup::get_pressed_button);
 	ClassDB::bind_method(D_METHOD("get_buttons"), &ButtonGroup::_get_buttons);
+	ADD_SIGNAL(MethodInfo("pressed", PropertyInfo(Variant::OBJECT, "button")));
 }
 
 ButtonGroup::ButtonGroup() {
