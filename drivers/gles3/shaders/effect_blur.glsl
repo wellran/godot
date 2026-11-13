@@ -10,9 +10,9 @@ precision highp float;
 precision highp int;
 #endif
 
-layout(location = 0) vec2 vertex_attrib;
+layout(location = 0) in vec2 vertex_attrib;
 /* clang-format on */
-layout(location = 4) vec2 uv_in;
+layout(location = 4) in vec2 uv_in;
 
 out vec2 uv_interp;
 
@@ -282,8 +282,8 @@ void main() {
 
 #ifdef GLOW_FIRST_PASS
 
-	float luminance = max(frag_color.r, max(frag_color.g, frag_color.b));
-	float feedback = max(smoothstep(glow_hdr_threshold, glow_hdr_threshold + glow_hdr_scale, luminance), glow_bloom);
+	float max_value = max(frag_color.r, max(frag_color.g, frag_color.b));
+	float feedback = max(smoothstep(glow_hdr_threshold, glow_hdr_threshold + glow_hdr_scale, max_value), glow_bloom);
 
 	frag_color = min(frag_color * feedback, vec4(luminance_cap));
 

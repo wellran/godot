@@ -1,13 +1,5 @@
 // cppspmd_sse.h
-// Note for Basis Universal: All of the "cppspmd" code and headers are OPTIONAL to Basis Universal. if BASISU_SUPPORT_SSE is 0, it will never be included and does not impact compilation.
-// SSE 2 or 4.1
-// Originally written by Nicolas Guillemot, Jefferson Amstutz in the "CppSPMD" project.
-// 4/20: Richard Geldreich: Macro control flow, more SIMD instruction sets, optimizations, supports using multiple SIMD instruction sets in same executable. Still a work in progress!
-//
-// Originally Copyright 2016 Nicolas Guillemot
-// Changed from the MIT license to Apache 2.0 with permission from the author.
-//
-// Modifications/enhancements Copyright 2020-2021 Binomial LLC
+// Copyright 2020-2022 Binomial LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +12,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// Notes for Basis Universal:
+// All of the "cppspmd" code and headers are OPTIONAL to Basis Universal. if BASISU_SUPPORT_SSE is 0, it will never be included and does not impact compilation.
+// The techniques used in this code were originally demonstrated for AVX2 by Nicolas Guillemot, Jefferson Amstutz in their "CppSPMD" project.
+// This is new code for use in Basis Universal, although it uses the same general SPMD techniques in SSE 2/4.
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -453,7 +450,7 @@ struct spmd_kernel
 		CPPSPMD_FORCE_INLINE explicit operator vint() const;
 								
 	private:
-		vbool& operator=(const vbool&);
+		//vbool& operator=(const vbool&);
 	};
 
 	friend vbool operator!(const vbool& v);
@@ -484,7 +481,7 @@ struct spmd_kernel
 		CPPSPMD_FORCE_INLINE explicit vfloat(int value) : m_value(_mm_set1_ps((float)value)) { }
 
 	private:
-		vfloat& operator=(const vfloat&);
+		//vfloat& operator=(const vfloat&);
 	};
 
 	CPPSPMD_FORCE_INLINE vfloat& store(vfloat& dst, const vfloat& src)
@@ -517,7 +514,7 @@ struct spmd_kernel
 		float* m_pValue;
 
 	private:
-		float_lref& operator=(const float_lref&);
+		//float_lref& operator=(const float_lref&);
 	};
 
 	CPPSPMD_FORCE_INLINE const float_lref& store(const float_lref& dst, const vfloat& src)
@@ -564,7 +561,7 @@ struct spmd_kernel
 		float* m_pValue;
 		
 	private:
-		float_vref& operator=(const float_vref&);
+		//float_vref& operator=(const float_vref&);
 	};
 
 	// Varying ref to varying float
@@ -574,7 +571,7 @@ struct spmd_kernel
 		vfloat* m_pValue;
 		
 	private:
-		vfloat_vref& operator=(const vfloat_vref&);
+		//vfloat_vref& operator=(const vfloat_vref&);
 	};
 
 	// Varying ref to varying int
@@ -584,7 +581,7 @@ struct spmd_kernel
 		vint* m_pValue;
 		
 	private:
-		vint_vref& operator=(const vint_vref&);
+		//vint_vref& operator=(const vint_vref&);
 	};
 
 	CPPSPMD_FORCE_INLINE const float_vref& store(const float_vref& dst, const vfloat& src);
@@ -627,7 +624,7 @@ struct spmd_kernel
 		int* m_pValue;
 
 	private:
-		int_lref& operator=(const int_lref&);
+		//int_lref& operator=(const int_lref&);
 	};
 		
 	CPPSPMD_FORCE_INLINE const int_lref& store(const int_lref& dst, const vint& src)
@@ -666,7 +663,7 @@ struct spmd_kernel
 		int16_t* m_pValue;
 
 	private:
-		int16_lref& operator=(const int16_lref&);
+		//int16_lref& operator=(const int16_lref&);
 	};
 
 	CPPSPMD_FORCE_INLINE const int16_lref& store(const int16_lref& dst, const vint& src)
@@ -723,7 +720,7 @@ struct spmd_kernel
 		const int* m_pValue;
 
 	private:
-		cint_lref& operator=(const cint_lref&);
+		//cint_lref& operator=(const cint_lref&);
 	};
 
 	CPPSPMD_FORCE_INLINE vint load(const cint_lref& src)
@@ -745,7 +742,7 @@ struct spmd_kernel
 		int* m_pValue;
 
 	private:
-		int_vref& operator=(const int_vref&);
+		//int_vref& operator=(const int_vref&);
 	};
 
 	// Varying ref to constant ints
@@ -755,7 +752,7 @@ struct spmd_kernel
 		const int* m_pValue;
 
 	private:
-		cint_vref& operator=(const cint_vref&);
+		//cint_vref& operator=(const cint_vref&);
 	};
 
 	// Varying int
@@ -813,7 +810,7 @@ struct spmd_kernel
 		}
 
 	private:
-		vint& operator=(const vint&);
+		//vint& operator=(const vint&);
 	};
 
 	// Load/store linear int
@@ -1209,7 +1206,7 @@ struct spmd_kernel
 	CPPSPMD_FORCE_INLINE vint load_all(const vint_vref& src)
 	{
 		// TODO: There's surely a better way
-		__m128i k;
+		__m128i k = _mm_setzero_si128();
 
 		k = insert_x(k, ((int*)(&src.m_pValue[extract_x(src.m_vindex)]))[0]);
 		k = insert_y(k, ((int*)(&src.m_pValue[extract_y(src.m_vindex)]))[1]);
@@ -1264,7 +1261,7 @@ struct spmd_kernel
 		}
 
 	private:
-		lint& operator=(const lint&);
+		//lint& operator=(const lint&);
 	};
 
 	CPPSPMD_FORCE_INLINE lint& store_all(lint& dst, const lint& src)
@@ -1330,7 +1327,7 @@ struct spmd_kernel
 		__m128 temp = _mm_add_ps(_mm_shuffle_ps(k3210, k3210, _MM_SHUFFLE(0, 1, 2, 3)), k3210);
 		return _mm_cvtss_f32(_mm_add_ss(_mm_movehl_ps(temp, temp), temp));
 	}
-		
+
 	CPPSPMD_FORCE_INLINE int reduce_add(vint v)
 	{
 		__m128i k3210 = blendv_mask_epi32(_mm_setzero_si128(), v.m_value, m_exec.m_mask);
@@ -1668,14 +1665,16 @@ CPPSPMD_FORCE_INLINE vint uniform_shift_right_epi16(const vint& a, const vint& b
 CPPSPMD_FORCE_INLINE vint undefined_vint() { return vint{ _mm_undefined_si128() }; }
 CPPSPMD_FORCE_INLINE vfloat undefined_vfloat() { return vfloat{ _mm_undefined_ps() }; }
 
+CPPSPMD_FORCE_INLINE vint zero_vint() { return vint{ _mm_setzero_si128() }; }
+CPPSPMD_FORCE_INLINE vfloat zero_vfloat() { return vfloat{ _mm_setzero_ps() }; }
+
 CPPSPMD_FORCE_INLINE vint vint_lane_set(int v0, int v1, int v2, int v3) { return vint{ _mm_set_epi32(v3, v2, v1, v0) }; }
 CPPSPMD_FORCE_INLINE vfloat vfloat_lane_set(float v0, float v1, float v2, float v3) { return vfloat{ _mm_set_ps(v3, v2, v1, v0) }; }
-
 CPPSPMD_FORCE_INLINE vint vint_lane_set_r(int v3, int v2, int v1, int v0) { return vint{ _mm_set_epi32(v3, v2, v1, v0) }; }
 CPPSPMD_FORCE_INLINE vfloat vfloat_lane_set_r(float v3, float v2, float v1, float v0) { return vfloat{ _mm_set_ps(v3, v2, v1, v0) }; }
-
 // control is an 8-bit immediate value containing 4 2-bit indices which shuffles the int32's in each 128-bit lane.
 #define VINT_LANE_SHUFFLE_EPI32(a, control) vint(_mm_shuffle_epi32((a).m_value, control))
+#define VFLOAT_LANE_SHUFFLE_PS(a, b, control) vfloat(_mm_shuffle_ps((a).m_value, (b).m_value, control))
 
 // control is an 8-bit immediate value containing 4 2-bit indices which shuffles the int16's in either the high or low 64-bit lane.
 #define VINT_LANE_SHUFFLELO_EPI16(a, control) vint(_mm_shufflelo_epi16((a).m_value, control))

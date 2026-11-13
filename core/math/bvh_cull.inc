@@ -9,48 +9,50 @@ struct CullParams {
 	T **result_array;
 	int *subindex_array;
 
-	// nobody truly understands how masks are intended to work.
-	uint32_t mask;
-	uint32_t pairable_type;
+	// We now process masks etc in a user template function,
+	// and these for simplicity assume even for cull tests there is a
+	// testing object (which has masks etc) for the user cull checks.
+	// This means for cull tests on their own, the client will usually
+	// want to create a dummy object, just in order to specify masks etc.
+	const T *tester;
 
 	// optional components for different tests
-	Point point;
+	POINT point;
 	BVHABB_CLASS abb;
 	typename BVHABB_CLASS::ConvexHull hull;
 	typename BVHABB_CLASS::Segment segment;
 
-	// when collision testing, non pairable moving items
-	// only need to be tested against the pairable tree.
-	// collisions with other non pairable items are irrelevant.
-	bool test_pairable_only;
+	// When collision testing, we can specify which tree ids
+	// to collide test against with the tree_collision_mask.
+	uint32_t tree_collision_mask;
 };
 
 private:
-void _cull_translate_hits(CullParams &p) {
+void _cull_translate_hits(CullParams &r_params) {
 	int num_hits = _cull_hits.size();
-	int left = p.result_max - p.result_count_overall;
+	int left = r_params.result_max - r_params.result_count_overall;
 
 	if (num_hits > left) {
 		num_hits = left;
 	}
 
-	int out_n = p.result_count_overall;
+	int out_n = r_params.result_count_overall;
 
 	for (int n = 0; n < num_hits; n++) {
 		uint32_t ref_id = _cull_hits[n];
 
 		const ItemExtra &ex = _extra[ref_id];
-		p.result_array[out_n] = ex.userdata;
+		r_params.result_array[out_n] = ex.userdata;
 
-		if (p.subindex_array) {
-			p.subindex_array[out_n] = ex.subindex;
+		if (r_params.subindex_array) {
+			r_params.subindex_array[out_n] = ex.subindex;
 		}
 
 		out_n++;
 	}
 
-	p.result_count = num_hits;
-	p.result_count_overall += num_hits;
+	r_params.result_count = num_hits;
+	r_params.result_count_overall += num_hits;
 }
 
 public:
@@ -58,8 +60,19 @@ int cull_convex(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
 
+	uint32_t tree_test_mask = 0;
+
 	for (int n = 0; n < NUM_TREES; n++) {
+		tree_test_mask <<= 1;
+		if (!tree_test_mask) {
+			tree_test_mask = 1;
+		}
+
 		if (_root_node_id[n] == BVHCommon::INVALID) {
+			continue;
+		}
+
+		if (!(r_params.tree_collision_mask & tree_test_mask)) {
 			continue;
 		}
 
@@ -77,8 +90,19 @@ int cull_segment(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
 
+	uint32_t tree_test_mask = 0;
+
 	for (int n = 0; n < NUM_TREES; n++) {
+		tree_test_mask <<= 1;
+		if (!tree_test_mask) {
+			tree_test_mask = 1;
+		}
+
 		if (_root_node_id[n] == BVHCommon::INVALID) {
+			continue;
+		}
+
+		if (!(r_params.tree_collision_mask & tree_test_mask)) {
 			continue;
 		}
 
@@ -96,8 +120,19 @@ int cull_point(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
 
+	uint32_t tree_test_mask = 0;
+
 	for (int n = 0; n < NUM_TREES; n++) {
+		tree_test_mask <<= 1;
+		if (!tree_test_mask) {
+			tree_test_mask = 1;
+		}
+
 		if (_root_node_id[n] == BVHCommon::INVALID) {
+			continue;
+		}
+
+		if (!(r_params.tree_collision_mask & tree_test_mask)) {
 			continue;
 		}
 
@@ -115,12 +150,20 @@ int cull_aabb(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
 
+	uint32_t tree_test_mask = 0;
+
 	for (int n = 0; n < NUM_TREES; n++) {
+		tree_test_mask <<= 1;
+		if (!tree_test_mask) {
+			tree_test_mask = 1;
+		}
+
 		if (_root_node_id[n] == BVHCommon::INVALID) {
 			continue;
 		}
 
-		if ((n == 0) && r_params.test_pairable_only) {
+		// the tree collision mask determines which trees to collide test against
+		if (!(r_params.tree_collision_mask & tree_test_mask)) {
 			continue;
 		}
 
@@ -134,38 +177,23 @@ int cull_aabb(CullParams &r_params, bool p_translate_hits = true) {
 	return r_params.result_count;
 }
 
-bool _cull_hits_full(const CullParams &p) {
+bool _cull_hits_full(const CullParams &p_params) {
 	// instead of checking every hit, we can do a lazy check for this condition.
 	// it isn't a problem if we write too much _cull_hits because they only the
 	// result_max amount will be translated and outputted. But we might as
 	// well stop our cull checks after the maximum has been reached.
-	return (int)_cull_hits.size() >= p.result_max;
+	return (int)_cull_hits.size() >= p_params.result_max;
 }
 
-// write this logic once for use in all routines
-// double check this as a possible source of bugs in future.
-bool _cull_pairing_mask_test_hit(uint32_t p_maskA, uint32_t p_typeA, uint32_t p_maskB, uint32_t p_typeB) const {
-	// double check this as a possible source of bugs in future.
-	bool A_match_B = p_maskA & p_typeB;
-
-	if (!A_match_B) {
-		bool B_match_A = p_maskB & p_typeA;
-		if (!B_match_A) {
-			return false;
-		}
-	}
-
-	return true;
-}
-
-void _cull_hit(uint32_t p_ref_id, CullParams &p) {
+void _cull_hit(uint32_t p_ref_id, CullParams &r_params) {
 	// take into account masks etc
 	// this would be more efficient to do before plane checks,
 	// but done here for ease to get started
 	if (USE_PAIRS) {
 		const ItemExtra &ex = _extra[p_ref_id];
 
-		if (!_cull_pairing_mask_test_hit(p.mask, p.pairable_type, ex.pairable_mask, ex.pairable_type)) {
+		// user supplied function (for e.g. pairable types and pairable masks in the render tree)
+		if (!USER_CULL_TEST_FUNCTION::user_cull_check(r_params.tester, ex.userdata)) {
 			return;
 		}
 	}
@@ -294,6 +322,7 @@ bool _cull_point_iterative(uint32_t p_node_id, CullParams &r_params) {
 	return true;
 }
 
+// Note: This is a very hot loop profiling wise. Take care when changing this and profile.
 bool _cull_aabb_iterative(uint32_t p_node_id, CullParams &r_params, bool p_fully_within = false) {
 	// our function parameters to keep on a stack
 	struct CullAABBParams {
@@ -336,16 +365,26 @@ bool _cull_aabb_iterative(uint32_t p_node_id, CullParams &r_params, bool p_fully
 					_cull_hit(child_id, r_params);
 				}
 			} else {
-				for (int n = 0; n < leaf.num_items; n++) {
+				// This section is the hottest area in profiling, so
+				// is optimized highly
+				// get this into a local register and preconverted to correct type
+				int leaf_num_items = leaf.num_items;
+
+				BVHABB_CLASS swizzled_tester;
+				swizzled_tester.min = -r_params.abb.neg_max;
+				swizzled_tester.neg_max = -r_params.abb.min;
+
+				for (int n = 0; n < leaf_num_items; n++) {
 					const BVHABB_CLASS &aabb = leaf.get_aabb(n);
 
-					if (aabb.intersects(r_params.abb)) {
+					if (swizzled_tester.intersects_swizzled(aabb)) {
 						uint32_t child_id = leaf.get_item_ref_id(n);
 
 						// register hit
 						_cull_hit(child_id, r_params);
 					}
 				}
+
 			} // not fully within
 		} else {
 			if (!cap.fully_within) {
@@ -508,8 +547,9 @@ bool _cull_convex_iterative(uint32_t p_node_id, CullParams &r_params, bool p_ful
 						uint32_t child_id = leaf.get_item_ref_id(n);
 
 						// full up with results? exit early, no point in further testing
-						if (!_cull_hit(child_id, r_params))
+						if (!_cull_hit(child_id, r_params)) {
 							return false;
+						}
 					}
 				}
 #endif // BVH_CONVEX_CULL_OPTIMIZED

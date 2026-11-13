@@ -7,6 +7,8 @@ namespace GodotTools
         VisualStudioForMac, // Mac-only
         MonoDevelop,
         VsCode,
-        Rider
+        Rider,
+        CustomEditor,
+        Fleet,
     }
 }

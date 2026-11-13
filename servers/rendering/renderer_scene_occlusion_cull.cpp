@@ -1,51 +1,41 @@
-/*************************************************************************/
-/*  renderer_scene_occlusion_cull.cpp                                    */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  renderer_scene_occlusion_cull.cpp                                     */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
 #include "renderer_scene_occlusion_cull.h"
 
+#include "core/config/engine.h"
+#include "servers/rendering/rendering_server.h"
+
 RendererSceneOcclusionCull *RendererSceneOcclusionCull::singleton = nullptr;
 
-const Vector3 RendererSceneOcclusionCull::HZBuffer::corners[8] = {
-	Vector3(0, 0, 0),
-	Vector3(0, 0, 1),
-	Vector3(0, 1, 0),
-	Vector3(0, 1, 1),
-	Vector3(1, 0, 0),
-	Vector3(1, 0, 1),
-	Vector3(1, 1, 0),
-	Vector3(1, 1, 1)
-};
-
-bool RendererSceneOcclusionCull::HZBuffer::is_empty() const {
-	return sizes.is_empty();
-}
+bool RendererSceneOcclusionCull::HZBuffer::occlusion_jitter_enabled = false;
 
 void RendererSceneOcclusionCull::HZBuffer::clear() {
 	if (sizes.is_empty()) {
@@ -60,10 +50,14 @@ void RendererSceneOcclusionCull::HZBuffer::clear() {
 	if (debug_image.is_valid()) {
 		debug_image.unref();
 	}
-	RS::get_singleton()->free(debug_texture);
+
+	ERR_FAIL_NULL(RenderingServer::get_singleton());
+	RS::get_singleton()->free_rid(debug_texture);
 }
 
 void RendererSceneOcclusionCull::HZBuffer::resize(const Size2i &p_size) {
+	occlusion_buffer_size = p_size;
+
 	if (p_size == Size2i()) {
 		clear();
 		return;
@@ -116,12 +110,15 @@ void RendererSceneOcclusionCull::HZBuffer::resize(const Size2i &p_size) {
 
 	debug_data.resize(sizes[0].x * sizes[0].y);
 	if (debug_texture.is_valid()) {
-		RS::get_singleton()->free(debug_texture);
+		RS::get_singleton()->free_rid(debug_texture);
 		debug_texture = RID();
 	}
 }
 
 void RendererSceneOcclusionCull::HZBuffer::update_mips() {
+	// Keep this up to date as a local to be used for occlusion timers.
+	occlusion_frame = Engine::get_singleton()->get_frames_drawn();
+
 	if (sizes.is_empty()) {
 		return;
 	}
@@ -177,10 +174,10 @@ RID RendererSceneOcclusionCull::HZBuffer::get_debug_texture() {
 
 	unsigned char *ptrw = debug_data.ptrw();
 	for (int i = 0; i < debug_data.size(); i++) {
-		ptrw[i] = MIN(mips[0][i] / debug_tex_range, 1.0) * 255;
+		ptrw[i] = MIN(Math::log(1.0 + mips[0][i]) / Math::log(1.0 + debug_tex_range), 1.0) * 255;
 	}
 
-	debug_image->create(sizes[0].x, sizes[0].y, false, Image::FORMAT_L8, debug_data);
+	debug_image->set_data(sizes[0].x, sizes[0].y, false, Image::FORMAT_L8, debug_data);
 
 	if (debug_texture.is_null()) {
 		debug_texture = RS::get_singleton()->texture_2d_create(debug_image);

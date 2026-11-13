@@ -108,8 +108,8 @@ U_NAMESPACE_END
  * @return locale ID
  * @stable ICU 3.4
  */
-U_CAPI const char * U_EXPORT2
-ucasemap_getLocale(const UCaseMap *csm);
+U_CAPI const char* U_EXPORT2
+ucasemap_getLocale(const UCaseMap* csm U_LIFETIME_BOUND);
 
 /**
  * Get the options bit set that is used for case folding and string comparisons.
@@ -157,8 +157,8 @@ ucasemap_setOptions(UCaseMap *csm, uint32_t options, UErrorCode *pErrorCode);
  * @return titlecasing break iterator
  * @stable ICU 3.8
  */
-U_CAPI const UBreakIterator * U_EXPORT2
-ucasemap_getBreakIterator(const UCaseMap *csm);
+U_CAPI const UBreakIterator* U_EXPORT2
+ucasemap_getBreakIterator(const UCaseMap* csm U_LIFETIME_BOUND);
 
 /**
  * Set the break iterator that is used for titlecasing.
@@ -202,8 +202,8 @@ ucasemap_setBreakIterator(UCaseMap *csm, UBreakIterator *iterToAdopt, UErrorCode
  *
  * The titlecase break iterator can be provided to customize for arbitrary
  * styles, using rules and dictionaries beyond the standard iterators.
- * The standard titlecase iterator for the root locale implements the
- * algorithm of Unicode TR 21.
+ * If the break iterator passed in is null, the default Unicode algorithm
+ * will be used to determine the titlecase positions.
  *
  * This function uses only the setText(), first() and next() methods of the
  * provided break iterator.
@@ -312,8 +312,8 @@ ucasemap_utf8ToUpper(const UCaseMap *csm,
  *
  * The titlecase break iterator can be provided to customize for arbitrary
  * styles, using rules and dictionaries beyond the standard iterators.
- * The standard titlecase iterator for the root locale implements the
- * algorithm of Unicode TR 21.
+ * If the break iterator passed in is null, the default Unicode algorithm
+ * will be used to determine the titlecase positions.
  *
  * This function uses only the setUText(), first(), next() and close() methods of the
  * provided break iterator.

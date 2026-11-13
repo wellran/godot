@@ -1,5 +1,5 @@
 /*
-r128.h: 128-bit (64.64) signed fixed-point arithmetic. Version 1.4.4
+r128.h: 128-bit (64.64) signed fixed-point arithmetic. Version 1.6.2
 
 COMPILATION
 -----------
@@ -127,8 +127,10 @@ extern double r128ToFloat(const R128 *v);
 // Copy
 extern void r128Copy(R128 *dst, const R128 *src);
 
-// Negate
-extern void r128Neg(R128 *dst, const R128 *src);
+// Sign manipulation
+extern void r128Neg(R128 *dst, const R128 *v);   // -v
+extern void r128Abs(R128* dst, const R128* v);   // abs(v)
+extern void r128Nabs(R128* dst, const R128* v);  // -abs(v)
 
 // Bitwise operations
 extern void r128Not(R128 *dst, const R128 *src);               // ~a
@@ -155,6 +157,7 @@ extern void r128Min(R128 *dst, const R128 *a, const R128 *b);
 extern void r128Max(R128 *dst, const R128 *a, const R128 *b);
 extern void r128Floor(R128 *dst, const R128 *v);
 extern void r128Ceil(R128 *dst, const R128 *v);
+extern void r128Round(R128 *dst, const R128 *v);    // round to nearest, rounding halfway values away from zero
 extern int  r128IsNeg(const R128 *v); // quick check for < 0
 
 // String conversion
@@ -299,8 +302,10 @@ struct numeric_limits<R128>
    static const bool has_infinity = false;
    static const bool has_quiet_NaN = false;
    static const bool has_signaling_NaN = false;
+#if !(__cplusplus > 202002L || (defined(_MSVC_LANG) && _MSVC_LANG > 202002L))
    static const float_denorm_style has_denorm = denorm_absent;
    static const bool has_denorm_loss = false;
+#endif
 
    static R128 infinity() throw() { return R128_zero; }
    static R128 quiet_NaN() throw() { return R128_zero; }
@@ -665,9 +670,9 @@ static int r128__clz64(R128_U64 x)
 // 32*32->64
 static R128_U64 r128__umul64(R128_U32 a, R128_U32 b)
 {
-#  if defined(_M_IX86) && !defined(R128_STDC_ONLY) && !defined(__MINGW32__)
+#  if defined(_M_IX86) && defined(_MSC_VER) && !defined(R128_STDC_ONLY)
    return __emulu(a, b);
-#  elif defined(_M_ARM) && !defined(R128_STDC_ONLY)
+#  elif defined(_M_ARM) && defined(_MSC_VER) && !defined(R128_STDC_ONLY)
    return _arm_umull(a, b);
 #  else
    return a * (R128_U64)b;
@@ -680,7 +685,7 @@ static R128_U32 r128__udiv64(R128_U32 nlo, R128_U32 nhi, R128_U32 d, R128_U32 *r
 #  if defined(_M_IX86) && (_MSC_VER >= 1920) && !defined(R128_STDC_ONLY)
    unsigned __int64 n = ((unsigned __int64)nhi << 32) | nlo;
    return _udiv64(n, d, rem);
-#  elif defined(_M_IX86) && !defined(R128_STDC_ONLY) && !defined(__MINGW32__)
+#  elif defined(_M_IX86) && defined(_MSC_VER) && !defined(R128_STDC_ONLY)
    __asm {
       mov eax, nlo
       mov edx, nhi
@@ -747,10 +752,8 @@ static void r128__umul128(R128 *dst, R128_U64 a, R128_U64 b)
 {
 #if defined(_M_X64) && !defined(R128_STDC_ONLY)
    dst->lo = _umul128(a, b, &dst->hi);
-#elif R128_64BIT && !defined(_MSC_VER) && !defined(R128_STDC_ONLY)
-   unsigned __int128 p0 = a * (unsigned __int128)b;
-   dst->hi = (R128_U64)(p0 >> 64);
-   dst->lo = (R128_U64)p0;
+#elif defined(__x86_64__) && !defined(R128_STDC_ONLY)
+   __asm__("mulq %3" : "=a"(dst->lo), "=d"(dst->hi) : "a"(a), "rm"(b));
 #else
    R128_U32 alo = (R128_U32)a;
    R128_U32 ahi = (R128_U32)(a >> 32);
@@ -795,7 +798,7 @@ static void r128__umul128(R128 *dst, R128_U64 a, R128_U64 b)
 }
 
 // 128/64->64
-#if defined(_M_X64) && (_MSC_VER < 1920) && !defined(R128_STDC_ONLY) && !defined(__MINGW32__)
+#if defined(_M_X64) && defined(_MSC_VER) && (_MSC_VER < 1920) && !defined(R128_STDC_ONLY)
 // MSVC x64 provides neither inline assembly nor (pre-2019) a div intrinsic, so we do fake
 // "inline assembly" to avoid long division or outline assembly.
 #pragma code_seg(".text")
@@ -810,13 +813,11 @@ static const r128__udiv128Proc r128__udiv128 = (r128__udiv128Proc)(void*)r128__u
 #else
 static R128_U64 r128__udiv128(R128_U64 nlo, R128_U64 nhi, R128_U64 d, R128_U64 *rem)
 {
-#if defined(_M_X64) && !defined(R128_STDC_ONLY) && !defined(__MINGW32__)
+#if defined(_M_X64) && defined(_MSC_VER) && !defined(R128_STDC_ONLY) && !defined(__clang__)
    return _udiv128(nhi, nlo, d, rem);
 #elif defined(__x86_64__) && !defined(R128_STDC_ONLY)
    R128_U64 q, r;
-   __asm("divq %4"
-      : "=a"(q), "=d"(r)
-      : "a"(nlo), "d"(nhi), "X"(d));
+   __asm("divq %4" : "=a"(q), "=d"(r) : "a"(nlo), "d"(nhi), "X"(d));
    *rem = r;
    return q;
 #else
@@ -921,38 +922,6 @@ static int r128__ucmp(const R128 *a, const R128 *b)
 
 static void r128__umul(R128 *dst, const R128 *a, const R128 *b)
 {
-#if defined(_M_X64) && !defined(R128_STDC_ONLY)
-   R128_U64 t0, t1;
-   R128_U64 lo, hi = 0;
-   unsigned char carry;
-
-   t0 = _umul128(a->lo, b->lo, &t1);
-   carry = _addcarry_u64(0, t1, t0 >> 63, &lo);
-   _addcarry_u64(carry, hi, hi, &hi);
-
-   t0 = _umul128(a->lo, b->hi, &t1);
-   carry = _addcarry_u64(0, lo, t0, &lo);
-   _addcarry_u64(carry, hi, t1, &hi);
-
-   t0 = _umul128(a->hi, b->lo, &t1);
-   carry = _addcarry_u64(0, lo, t0, &lo);
-   _addcarry_u64(carry, hi, t1, &hi);
-
-   t0 = _umul128(a->hi, b->hi, &t1);
-   hi += t0;
-
-   R128_SET2(dst, lo, hi);
-#elif defined(__x86_64__) && !defined(R128_STDC_ONLY)
-   unsigned __int128 p0, p1, p2, p3;
-   p0 = a->lo * (unsigned __int128)b->lo;
-   p1 = a->lo * (unsigned __int128)b->hi;
-   p2 = a->hi * (unsigned __int128)b->lo;
-   p3 = a->hi * (unsigned __int128)b->hi;
-
-   p0 = (p3 << 64) + p2 + p1 + (p0 >> 64) + ((R128_U64)p0 >> 63);
-   dst->lo = (R128_U64)p0;
-   dst->hi = (R128_U64)(p0 >> 64);
-#else
    R128 p0, p1, p2, p3, round;
 
    r128__umul128(&p0, a->lo, b->lo);
@@ -971,7 +940,6 @@ static void r128__umul(R128 *dst, const R128 *a, const R128 *b)
    r128Add(&p0, &p0, &p3);
 
    R128_SET2(dst, p0.lo, p0.hi);
-#endif
 }
 
 // Shift d left until the high bit is set, and shift n left by the same amount.
@@ -1188,8 +1156,8 @@ static int r128__format(char *dst, size_t dstSize, const R128 *v, const R128ToSt
       // print a maximum of 20 digits
       fullPrecision = 0;
       precision = 20;
-   } else if (precision > sizeof(buf) - 21) {
-      trail = precision - (sizeof(buf) - 21);
+   } else if (precision > (int)(sizeof(buf) - 21)) {
+      trail = precision - (int)(sizeof(buf) - 21);
       precision -= trail;
    }
 
@@ -1413,15 +1381,15 @@ void r128FromString(R128 *dst, const char *s, char **endptr)
          }
       }
 
-      for (--s; s >= exp; --s) {
+      for (const char *c = s - 1; c >= exp; --c) {
          R128_U64 digit, unused;
 
-         if ('0' <= *s && *s <= '9') {
-            digit = *s - '0';
-         } else if ('a' <= *s && *s <= 'f') {
-            digit = *s - 'a' + 10;
+         if ('0' <= *c && *c <= '9') {
+            digit = *c - '0';
+         } else if ('a' <= *c && *c <= 'f') {
+            digit = *c - 'a' + 10;
          } else {
-            digit = *s - 'A' + 10;
+            digit = *c - 'A' + 10;
          }
 
          lo = r128__udiv128(lo, digit, base, &unused);
@@ -1441,7 +1409,11 @@ void r128FromString(R128 *dst, const char *s, char **endptr)
 R128_S64 r128ToInt(const R128 *v)
 {
    R128_ASSERT(v != NULL);
-   return (R128_S64)v->hi;
+   if ((R128_S64)v->hi < 0) {
+      return (R128_S64)v->hi + (v->lo != 0);
+   } else {
+      return (R128_S64)v->hi;
+   }
 }
 
 double r128ToFloat(const R128 *v)
@@ -1546,10 +1518,38 @@ void r128Copy(R128 *dst, const R128 *src)
    R128_DEBUG_SET(dst);
 }
 
-void r128Neg(R128 *dst, const R128 *src)
+void r128Neg(R128 *dst, const R128 *v)
 {
-   r128__neg(dst, src);
+   r128__neg(dst, v);
    R128_DEBUG_SET(dst);
+}
+
+void r128Abs(R128* dst, const R128* v)
+{
+    R128 sign, inv;
+
+    R128_ASSERT(dst != NULL);
+    R128_ASSERT(v != NULL);
+
+    sign.lo = sign.hi = (R128_U64)(((R128_S64)v->hi) >> 63);
+    inv.lo = v->lo ^ sign.lo;
+    inv.hi = v->hi ^ sign.hi;
+
+    r128Sub(dst, &inv, &sign);
+}
+
+void r128Nabs(R128* dst, const R128* v)
+{
+    R128 sign, inv;
+
+    R128_ASSERT(dst != NULL);
+    R128_ASSERT(v != NULL);
+
+    sign.lo = sign.hi = (R128_U64)(((R128_S64)v->hi) >> 63);
+    inv.lo = v->lo ^ sign.lo;
+    inv.hi = v->hi ^ sign.hi;
+
+    r128Sub(dst, &sign, &inv);
 }
 
 void r128Not(R128 *dst, const R128 *src)
@@ -1602,7 +1602,7 @@ void r128Shl(R128 *dst, const R128 *src, int amount)
    R128_ASSERT(dst != NULL);
    R128_ASSERT(src != NULL);
 
-#if defined(_M_IX86) && !defined(R128_STDC_ONLY) && !defined(__MINGW32__)
+#if defined(_M_IX86) && defined(_MSC_VER) && !defined(R128_STDC_ONLY)
    __asm {
       // load src
       mov edx, dword ptr[src]
@@ -1643,7 +1643,7 @@ void r128Shl(R128 *dst, const R128 *src, int amount)
       r[1] = r[0] << (amount - 64);
       r[0] = 0;
    } else if (amount) {
-#  ifdef _M_X64
+#  if defined(_M_X64) && !defined(R128_STDC_ONLY)
       r[1] = __shiftleft128(r[0], r[1], (char) amount);
 #  else
       r[1] = (r[1] << amount) | (r[0] >> (64 - amount));
@@ -1664,7 +1664,7 @@ void r128Shr(R128 *dst, const R128 *src, int amount)
    R128_ASSERT(dst != NULL);
    R128_ASSERT(src != NULL);
 
-#if defined(_M_IX86) && !defined(R128_STDC_ONLY) && !defined(__MINGW32__)
+#if defined(_M_IX86) && defined(_MSC_VER) && !defined(R128_STDC_ONLY)
    __asm {
       // load src
       mov edx, dword ptr[src]
@@ -1705,7 +1705,7 @@ void r128Shr(R128 *dst, const R128 *src, int amount)
       r[2] = r[3] >> (amount - 64);
       r[3] = 0;
    } else if (amount) {
-#ifdef _M_X64
+#if defined(_M_X64) && !defined(R128_STDC_ONLY)
       r[2] = __shiftright128(r[2], r[3], (char) amount);
 #else
       r[2] = (r[2] >> amount) | (r[3] << (64 - amount));
@@ -1726,7 +1726,7 @@ void r128Sar(R128 *dst, const R128 *src, int amount)
    R128_ASSERT(dst != NULL);
    R128_ASSERT(src != NULL);
 
-#if defined(_M_IX86) && !defined(R128_STDC_ONLY) && !defined(__MINGW32__)
+#if defined(_M_IX86) && defined(_MSC_VER) && !defined(R128_STDC_ONLY)
    __asm {
       // load src
       mov edx, dword ptr[src]
@@ -2097,11 +2097,7 @@ void r128Floor(R128 *dst, const R128 *v)
    R128_ASSERT(dst != NULL);
    R128_ASSERT(v != NULL);
 
-   if ((R128_S64)v->hi < 0) {
-      dst->hi = v->hi - (v->lo != 0);
-   } else {
-      dst->hi = v->hi;
-   }
+   dst->hi = v->hi;
    dst->lo = 0;
    R128_DEBUG_SET(dst);
 }
@@ -2111,11 +2107,17 @@ void r128Ceil(R128 *dst, const R128 *v)
    R128_ASSERT(dst != NULL);
    R128_ASSERT(v != NULL);
 
-   if ((R128_S64)v->hi > 0) {
-      dst->hi = v->hi + (v->lo != 0);
-   } else {
-      dst->hi = v->hi;
-   }
+   dst->hi = v->hi + (v->lo != 0);
+   dst->lo = 0;
+   R128_DEBUG_SET(dst);
+}
+
+void r128Round(R128* dst, const R128* v)
+{
+   R128_ASSERT(dst != NULL);
+   R128_ASSERT(v != NULL);
+
+   dst->hi = v->hi + (v->lo >= R128_LIT_U64(0x8000000000000000) + (R128_U64)((R128_S64)v->hi < 0));
    dst->lo = 0;
    R128_DEBUG_SET(dst);
 }

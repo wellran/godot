@@ -1,92 +1,85 @@
-/*************************************************************************/
-/*  test_main.cpp                                                        */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  test_main.cpp                                                         */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
 #include "test_main.h"
 
-#include "tests/core/io/test_config_file.h"
-#include "tests/core/io/test_file_access.h"
-#include "tests/core/io/test_image.h"
-#include "tests/core/io/test_json.h"
-#include "tests/core/io/test_marshalls.h"
-#include "tests/core/io/test_pck_packer.h"
-#include "tests/core/io/test_resource.h"
-#include "tests/core/io/test_xml_parser.h"
-#include "tests/core/math/test_aabb.h"
-#include "tests/core/math/test_astar.h"
-#include "tests/core/math/test_basis.h"
-#include "tests/core/math/test_color.h"
-#include "tests/core/math/test_expression.h"
-#include "tests/core/math/test_geometry_2d.h"
-#include "tests/core/math/test_geometry_3d.h"
-#include "tests/core/math/test_math.h"
-#include "tests/core/math/test_random_number_generator.h"
-#include "tests/core/math/test_rect2.h"
-#include "tests/core/object/test_class_db.h"
-#include "tests/core/object/test_method_bind.h"
-#include "tests/core/object/test_object.h"
-#include "tests/core/string/test_node_path.h"
-#include "tests/core/string/test_string.h"
-#include "tests/core/string/test_translation.h"
-#include "tests/core/templates/test_command_queue.h"
-#include "tests/core/templates/test_list.h"
-#include "tests/core/templates/test_local_vector.h"
-#include "tests/core/templates/test_lru.h"
-#include "tests/core/templates/test_oa_hash_map.h"
-#include "tests/core/templates/test_ordered_hash_map.h"
-#include "tests/core/templates/test_paged_array.h"
-#include "tests/core/templates/test_vector.h"
-#include "tests/core/test_crypto.h"
-#include "tests/core/test_hashing_context.h"
-#include "tests/core/test_time.h"
-#include "tests/core/variant/test_array.h"
-#include "tests/core/variant/test_dictionary.h"
-#include "tests/core/variant/test_variant.h"
-#include "tests/scene/test_code_edit.h"
-#include "tests/scene/test_curve.h"
-#include "tests/scene/test_gradient.h"
-#include "tests/scene/test_gui.h"
-#include "tests/scene/test_path_3d.h"
-#include "tests/servers/test_physics_2d.h"
-#include "tests/servers/test_physics_3d.h"
-#include "tests/servers/test_render.h"
-#include "tests/servers/test_shader_lang.h"
-#include "tests/servers/test_text_server.h"
-#include "tests/test_validate_testing.h"
-
-#include "modules/modules_tests.gen.h"
-
+#include "core/config/engine.h"
+#include "core/input/input.h"
+#include "core/input/input_map.h"
+#include "core/io/dir_access.h"
+#include "core/object/worker_thread_pool.h"
+#include "core/os/os.h"
+#include "core/string/translation_server.h"
+#include "scene/main/scene_tree.h"
+#include "scene/main/window.h"
+#include "scene/theme/theme_db.h"
+#include "servers/audio/audio_driver.h"
+#include "servers/audio/audio_server.h"
+#include "servers/display/accessibility_server.h"
+#include "servers/rendering/rendering_server.h"
+#include "tests/display_server_mock.h"
+#include "tests/force_link.gen.h"
+#include "tests/signal_watcher.h"
 #include "tests/test_macros.h"
+#include "tests/test_utils.h"
 
-#include "scene/resources/default_theme/default_theme.h"
+#ifdef TOOLS_ENABLED
+#include "editor/file_system/editor_paths.h"
+#include "editor/settings/editor_settings.h"
+#endif // TOOLS_ENABLED
+
+#ifndef NAVIGATION_2D_DISABLED
+#include "servers/navigation_2d/navigation_server_2d.h"
+#include "servers/navigation_2d/navigation_server_2d_manager.h"
+#endif // NAVIGATION_2D_DISABLED
+#ifndef NAVIGATION_3D_DISABLED
+#include "servers/navigation_3d/navigation_server_3d.h"
+#include "servers/navigation_3d/navigation_server_3d_manager.h"
+#endif // NAVIGATION_3D_DISABLED
+
+#ifndef PHYSICS_2D_DISABLED
+#include "servers/physics_2d/physics_server_2d.h"
+#include "servers/physics_2d/physics_server_2d_dummy.h"
+#include "servers/physics_2d/physics_server_2d_manager.h"
+#endif // PHYSICS_2D_DISABLED
+#ifndef PHYSICS_3D_DISABLED
+#include "servers/physics_3d/physics_server_3d.h"
+#include "servers/physics_3d/physics_server_3d_dummy.h"
+#include "servers/physics_3d/physics_server_3d_manager.h"
+#endif // PHYSICS_3D_DISABLED
+
+#include "modules/modules_tests.gen.h" // IWYU pragma: keep // TODO: Migrate module tests to compilation files.
 
 int test_main(int argc, char *argv[]) {
+	ForceLink::force_link_tests();
+
 	bool run_tests = true;
 
 	// Convert arguments to Godot's command-line.
@@ -95,26 +88,37 @@ int test_main(int argc, char *argv[]) {
 	for (int i = 0; i < argc; i++) {
 		args.push_back(String::utf8(argv[i]));
 	}
-	OS::get_singleton()->set_cmdline("", args);
+	OS::get_singleton()->set_cmdline("", args, List<String>());
+	DisplayServerMock::register_mock_driver();
+
+	WorkerThreadPool::get_singleton()->init();
+
+	{
+		const String test_path = TestUtils::get_temp_path("");
+		Ref<DirAccess> da = DirAccess::open(test_path); // get_temp_path() automatically creates the folder.
+		ERR_FAIL_COND_V(da.is_null(), 0);
+		ERR_FAIL_COND_V_MSG(da->erase_contents_recursive() != OK, 0, "Failed to delete files");
+	}
 
 	// Run custom test tools.
 	if (test_commands) {
-		for (Map<String, TestFunc>::Element *E = test_commands->front(); E; E = E->next()) {
-			if (args.find(E->key())) {
-				const TestFunc &test_func = E->get();
-				test_func();
+		int res = 0;
+		for (const KeyValue<String, TestFunc> &E : (*test_commands)) {
+			if (args.find(E.key)) {
+				const TestFunc &test_func = E.value;
+				res = test_func();
 				run_tests = false;
 				break;
 			}
 		}
 		if (!run_tests) {
 			delete test_commands;
-			return 0;
+			return res;
 		}
 	}
 	// Doctest runner.
 	doctest::Context test_context;
-	List<String> test_args;
+	LocalVector<String> test_args;
 
 	// Clean arguments of "--test" from the args.
 	for (int x = 0; x < argc; x++) {
@@ -127,7 +131,7 @@ int test_main(int argc, char *argv[]) {
 	if (test_args.size() > 0) {
 		// Convert Godot command line arguments back to standard arguments.
 		char **doctest_args = new char *[test_args.size()];
-		for (int x = 0; x < test_args.size(); x++) {
+		for (uint32_t x = 0; x < test_args.size(); x++) {
 			// Operation to convert Godot string to non wchar string.
 			CharString cs = test_args[x].utf8();
 			const char *str = cs.get_data();
@@ -139,7 +143,7 @@ int test_main(int argc, char *argv[]) {
 
 		test_context.applyCommandLine(test_args.size(), doctest_args);
 
-		for (int x = 0; x < test_args.size(); x++) {
+		for (uint32_t x = 0; x < test_args.size(); x++) {
 			delete[] doctest_args[x];
 		}
 		delete[] doctest_args;
@@ -150,64 +154,146 @@ int test_main(int argc, char *argv[]) {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#include "servers/navigation_server_2d.h"
-#include "servers/navigation_server_3d.h"
-#include "servers/rendering/rendering_server_default.h"
-
 struct GodotTestCaseListener : public doctest::IReporter {
 	GodotTestCaseListener(const doctest::ContextOptions &p_in) {}
 
 	SignalWatcher *signal_watcher = nullptr;
 
-	PhysicsServer3D *physics_3d_server = nullptr;
-	PhysicsServer2D *physics_2d_server = nullptr;
-	NavigationServer3D *navigation_3d_server = nullptr;
-	NavigationServer2D *navigation_2d_server = nullptr;
+#ifndef PHYSICS_2D_DISABLED
+	PhysicsServer2D *physics_server_2d = nullptr;
+#endif // PHYSICS_2D_DISABLED
+#ifndef PHYSICS_3D_DISABLED
+	PhysicsServer3D *physics_server_3d = nullptr;
+#endif // PHYSICS_3D_DISABLED
+
+#ifndef NAVIGATION_2D_DISABLED
+	NavigationServer2D *navigation_server_2d = nullptr;
+#endif // NAVIGATION_2D_DISABLED
+#ifndef NAVIGATION_3D_DISABLED
+	NavigationServer3D *navigation_server_3d = nullptr;
+#endif // NAVIGATION_3D_DISABLED
 
 	void test_case_start(const doctest::TestCaseData &p_in) override {
-		SignalWatcher::get_singleton()->_clear_signals();
+		reinitialize();
 
 		String name = String(p_in.m_name);
+		[[maybe_unused]] String suite_name = String(p_in.m_test_suite);
 
-		if (name.find("[SceneTree]") != -1) {
-			GLOBAL_DEF("memory/limits/multithreaded_server/rid_pool_prealloc", 60);
-			memnew(MessageQueue);
-
-			GLOBAL_DEF("internationalization/rendering/force_right_to_left_layout_direction", false);
+		if (name.contains("[SceneTree]") || name.contains("[Editor]")) {
+			memnew(Input);
+			Input::get_singleton()->set_use_accumulated_input(false);
 
 			Error err = OK;
 			OS::get_singleton()->set_has_server_feature_callback(nullptr);
-			for (int i = 0; i < DisplayServer::get_create_function_count(); i++) {
-				if (String("headless") == DisplayServer::get_create_function_name(i)) {
-					DisplayServer::create(i, "", DisplayServer::WindowMode::WINDOW_MODE_MINIMIZED, DisplayServer::VSyncMode::VSYNC_ENABLED, 0, Vector2i(0, 0), err);
+
+			for (int i = 0; i < AccessibilityServer::get_create_function_count(); i++) {
+				if (String("dummy") == AccessibilityServer::get_create_function_name(i)) {
+					AccessibilityServer::create(i, err);
 					break;
 				}
 			}
-			memnew(RenderingServerDefault());
-			RenderingServerDefault::get_singleton()->init();
-			RenderingServerDefault::get_singleton()->set_render_loop_enabled(false);
 
-			physics_3d_server = PhysicsServer3DManager::new_default_server();
-			physics_3d_server->init();
+			for (int i = 0; i < DisplayServer::get_create_function_count(); i++) {
+				if (String("mock") == DisplayServer::get_create_function_name(i)) {
+					DisplayServer::create(i, "", DisplayServerEnums::WindowMode::WINDOW_MODE_MINIMIZED, DisplayServerEnums::VSyncMode::VSYNC_ENABLED, 0, nullptr, Vector2i(0, 0), DisplayServerEnums::SCREEN_PRIMARY, DisplayServerEnums::CONTEXT_EDITOR, 0, err);
+					break;
+				}
+			}
 
-			physics_2d_server = PhysicsServer2DManager::new_default_server();
-			physics_2d_server->init();
+			// ThemeDB requires RenderingServer to initialize the default theme.
+			// So we have to do this for each test case. Also make sure there is
+			// no residual theme from something else.
+			ThemeDB::get_singleton()->finalize_theme();
+			ThemeDB::get_singleton()->initialize_theme();
 
-			navigation_3d_server = NavigationServer3DManager::new_default_server();
-			navigation_2d_server = memnew(NavigationServer2D);
+#ifndef PHYSICS_3D_DISABLED
+			physics_server_3d = PhysicsServer3DManager::get_singleton()->new_default_server();
+			if (!physics_server_3d) {
+				physics_server_3d = memnew(PhysicsServer3DDummy);
+			}
+			physics_server_3d->init();
+#endif // PHYSICS_3D_DISABLED
+
+#ifndef PHYSICS_2D_DISABLED
+			physics_server_2d = PhysicsServer2DManager::get_singleton()->new_default_server();
+			if (!physics_server_2d) {
+				physics_server_2d = memnew(PhysicsServer2DDummy);
+			}
+			physics_server_2d->init();
+#endif // PHYSICS_2D_DISABLED
+
+			ERR_PRINT_OFF;
+#ifndef NAVIGATION_3D_DISABLED
+			navigation_server_3d = NavigationServer3DManager::get_singleton()->new_default_server();
+#endif // NAVIGATION_3D_DISABLED
+#ifndef NAVIGATION_2D_DISABLED
+			navigation_server_2d = NavigationServer2DManager::get_singleton()->new_default_server();
+#endif // NAVIGATION_2D_DISABLED
+			ERR_PRINT_ON;
 
 			memnew(InputMap);
 			InputMap::get_singleton()->load_default();
 
-			make_default_theme(false, Ref<Font>());
-
 			memnew(SceneTree);
 			SceneTree::get_singleton()->initialize();
+			if (!DisplayServer::get_singleton()->has_feature(DisplayServerEnums::FEATURE_SUBWINDOWS)) {
+				SceneTree::get_singleton()->get_root()->set_embedding_subwindows(true);
+			}
+
+#ifdef TOOLS_ENABLED
+			if (name.contains("[Editor]")) {
+				Engine::get_singleton()->set_editor_hint(true);
+				EditorPaths::create();
+				EditorSettings::create();
+			}
+#endif // TOOLS_ENABLED
+
 			return;
 		}
+
+		if (name.contains("[Audio]")) {
+			// The last driver index should always be the dummy driver.
+			int dummy_idx = AudioDriverManager::get_driver_count() - 1;
+			AudioDriverManager::initialize(dummy_idx);
+			AudioServer *audio_server = memnew(AudioServer);
+			audio_server->init();
+			return;
+		}
+
+#ifndef NAVIGATION_3D_DISABLED
+		if (suite_name.contains("[Navigation3D]") && navigation_server_3d == nullptr) {
+			ERR_PRINT_OFF;
+			navigation_server_3d = NavigationServer3DManager::get_singleton()->new_default_server();
+			ERR_PRINT_ON;
+			return;
+		}
+#endif // NAVIGATION_3D_DISABLED
+
+#ifndef NAVIGATION_2D_DISABLED
+		if (suite_name.contains("[Navigation2D]") && navigation_server_2d == nullptr) {
+			ERR_PRINT_OFF;
+			navigation_server_2d = NavigationServer2DManager::get_singleton()->new_default_server();
+			ERR_PRINT_ON;
+			return;
+		}
+#endif // NAVIGATION_2D_DISABLED
 	}
 
 	void test_case_end(const doctest::CurrentTestCaseStats &) override {
+#ifdef TOOLS_ENABLED
+		if (EditorSettings::get_singleton()) {
+			EditorSettings::destroy();
+
+			// Instantiating the EditorSettings singleton sets the locale to the editor's language.
+			TranslationServer::get_singleton()->set_locale("en");
+		}
+		if (EditorPaths::get_singleton()) {
+			EditorPaths::free();
+		}
+#endif // TOOLS_ENABLED
+
+		Engine::get_singleton()->set_editor_hint(false);
+
 		if (SceneTree::get_singleton()) {
 			SceneTree::get_singleton()->finalize();
 		}
@@ -216,52 +302,51 @@ struct GodotTestCaseListener : public doctest::IReporter {
 			MessageQueue::get_singleton()->flush();
 		}
 
-		if (SceneTree::get_singleton()) {
-			memdelete(SceneTree::get_singleton());
-		}
+		memdelete(SceneTree::get_singleton());
 
-		clear_default_theme();
-
-		if (navigation_3d_server) {
-			memdelete(navigation_3d_server);
-			navigation_3d_server = nullptr;
+#ifndef NAVIGATION_3D_DISABLED
+		if (navigation_server_3d) {
+			memdelete(navigation_server_3d);
+			navigation_server_3d = nullptr;
 		}
+#endif // NAVIGATION_3D_DISABLED
 
-		if (navigation_2d_server) {
-			memdelete(navigation_2d_server);
-			navigation_2d_server = nullptr;
+#ifndef NAVIGATION_2D_DISABLED
+		if (navigation_server_2d) {
+			memdelete(navigation_server_2d);
+			navigation_server_2d = nullptr;
 		}
+#endif // NAVIGATION_2D_DISABLED
 
-		if (physics_3d_server) {
-			physics_3d_server->finish();
-			memdelete(physics_3d_server);
-			physics_3d_server = nullptr;
+#ifndef PHYSICS_3D_DISABLED
+		if (physics_server_3d) {
+			physics_server_3d->finish();
+			memdelete(physics_server_3d);
+			physics_server_3d = nullptr;
 		}
+#endif // PHYSICS_3D_DISABLED
 
-		if (physics_2d_server) {
-			physics_2d_server->finish();
-			memdelete(physics_2d_server);
-			physics_2d_server = nullptr;
+#ifndef PHYSICS_2D_DISABLED
+		if (physics_server_2d) {
+			physics_server_2d->finish();
+			memdelete(physics_server_2d);
+			physics_server_2d = nullptr;
 		}
+#endif // PHYSICS_2D_DISABLED
+
+		memdelete(Input::get_singleton());
 
 		if (RenderingServer::get_singleton()) {
-			RenderingServer::get_singleton()->sync();
-			RenderingServer::get_singleton()->global_variables_clear();
-			RenderingServer::get_singleton()->finish();
-			memdelete(RenderingServer::get_singleton());
+			ThemeDB::get_singleton()->finalize_theme();
 		}
 
-		if (DisplayServer::get_singleton()) {
-			memdelete(DisplayServer::get_singleton());
-		}
+		memdelete(AccessibilityServer::get_singleton());
+		memdelete(DisplayServer::get_singleton());
+		memdelete(InputMap::get_singleton());
 
-		if (InputMap::get_singleton()) {
-			memdelete(InputMap::get_singleton());
-		}
-
-		if (MessageQueue::get_singleton()) {
-			MessageQueue::get_singleton()->flush();
-			memdelete(MessageQueue::get_singleton());
+		if (AudioServer::get_singleton()) {
+			AudioServer::get_singleton()->finish();
+			memdelete(AudioServer::get_singleton());
 		}
 	}
 
@@ -274,11 +359,11 @@ struct GodotTestCaseListener : public doctest::IReporter {
 	}
 
 	void test_case_reenter(const doctest::TestCaseData &) override {
-		SignalWatcher::get_singleton()->_clear_signals();
+		reinitialize();
 	}
 
 	void subcase_start(const doctest::SubcaseSignature &) override {
-		SignalWatcher::get_singleton()->_clear_signals();
+		reinitialize();
 	}
 
 	void report_query(const doctest::QueryData &) override {}
@@ -288,6 +373,12 @@ struct GodotTestCaseListener : public doctest::IReporter {
 	void log_assert(const doctest::AssertData &in) override {}
 	void log_message(const doctest::MessageData &) override {}
 	void test_case_skipped(const doctest::TestCaseData &) override {}
+
+private:
+	void reinitialize() {
+		Math::seed(0x60d07);
+		SignalWatcher::get_singleton()->_clear_signals();
+	}
 };
 
 REGISTER_LISTENER("GodotTestCaseListener", 1, GodotTestCaseListener);

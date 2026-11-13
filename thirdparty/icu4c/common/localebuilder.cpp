@@ -1,23 +1,26 @@
 // © 2019 and later: Unicode, Inc. and others.
 // License & terms of use: http://www.unicode.org/copyright.html
 
+#include <optional>
+#include <string_view>
 #include <utility>
 
-#include "bytesinkutil.h"  // CharStringByteSink
+#include "bytesinkutil.h"  // StringByteSink<CharString>
 #include "charstr.h"
 #include "cstring.h"
+#include "fixedstring.h"
 #include "ulocimp.h"
 #include "unicode/localebuilder.h"
 #include "unicode/locid.h"
 
-U_NAMESPACE_BEGIN
+namespace {
 
-#define UPRV_ISDIGIT(c) (((c) >= '0') && ((c) <= '9'))
-#define UPRV_ISALPHANUM(c) (uprv_isASCIILetter(c) || UPRV_ISDIGIT(c) )
+inline bool UPRV_ISDIGIT(char c) { return c >= '0' && c <= '9'; }
+inline bool UPRV_ISALPHANUM(char c) { return uprv_isASCIILetter(c) || UPRV_ISDIGIT(c); }
 
-const char* kAttributeKey = "attribute";
+constexpr const char* kAttributeKey = "attribute";
 
-static bool _isExtensionSubtags(char key, const char* s, int32_t len) {
+bool _isExtensionSubtags(char key, const char* s, int32_t len) {
     switch (uprv_tolower(key)) {
         case 'u':
             return ultag_isUnicodeExtensionSubtags(s, len);
@@ -29,6 +32,10 @@ static bool _isExtensionSubtags(char key, const char* s, int32_t len) {
             return ultag_isExtensionSubtags(s, len);
     }
 }
+
+}  // namespace
+
+U_NAMESPACE_BEGIN
 
 LocaleBuilder::LocaleBuilder() : UObject(), status_(U_ZERO_ERROR), language_(),
     script_(), region_(), variant_(nullptr), extensions_(nullptr)
@@ -44,7 +51,7 @@ LocaleBuilder::~LocaleBuilder()
     delete extensions_;
 }
 
-LocaleBuilder& LocaleBuilder::setLocale(const Locale& locale)
+LocaleBuilder& LocaleBuilder::setLocale(const Locale& locale) U_LIFETIME_BOUND
 {
     clear();
     setLanguage(locale.getLanguage());
@@ -58,7 +65,7 @@ LocaleBuilder& LocaleBuilder::setLocale(const Locale& locale)
     return *this;
 }
 
-LocaleBuilder& LocaleBuilder::setLanguageTag(StringPiece tag)
+LocaleBuilder& LocaleBuilder::setLanguageTag(StringPiece tag) U_LIFETIME_BOUND
 {
     Locale l = Locale::forLanguageTag(tag, status_);
     if (U_FAILURE(status_)) { return *this; }
@@ -68,8 +75,10 @@ LocaleBuilder& LocaleBuilder::setLanguageTag(StringPiece tag)
     return *this;
 }
 
-static void setField(StringPiece input, char* dest, UErrorCode& errorCode,
-                     UBool (*test)(const char*, int32_t)) {
+namespace {
+
+void setField(StringPiece input, char* dest, UErrorCode& errorCode,
+              bool (*test)(const char*, int32_t)) {
     if (U_FAILURE(errorCode)) { return; }
     if (input.empty()) {
         dest[0] = '\0';
@@ -81,25 +90,29 @@ static void setField(StringPiece input, char* dest, UErrorCode& errorCode,
     }
 }
 
-LocaleBuilder& LocaleBuilder::setLanguage(StringPiece language)
+}  // namespace
+
+LocaleBuilder& LocaleBuilder::setLanguage(StringPiece language) U_LIFETIME_BOUND
 {
     setField(language, language_, status_, &ultag_isLanguageSubtag);
     return *this;
 }
 
-LocaleBuilder& LocaleBuilder::setScript(StringPiece script)
+LocaleBuilder& LocaleBuilder::setScript(StringPiece script) U_LIFETIME_BOUND
 {
     setField(script, script_, status_, &ultag_isScriptSubtag);
     return *this;
 }
 
-LocaleBuilder& LocaleBuilder::setRegion(StringPiece region)
+LocaleBuilder& LocaleBuilder::setRegion(StringPiece region) U_LIFETIME_BOUND
 {
     setField(region, region_, status_, &ultag_isRegionSubtag);
     return *this;
 }
 
-static void transform(char* data, int32_t len) {
+namespace {
+
+void transform(char* data, int32_t len) {
     for (int32_t i = 0; i < len; i++, data++) {
         if (*data == '_') {
             *data = '-';
@@ -109,7 +122,9 @@ static void transform(char* data, int32_t len) {
     }
 }
 
-LocaleBuilder& LocaleBuilder::setVariant(StringPiece variant)
+}  // namespace
+
+LocaleBuilder& LocaleBuilder::setVariant(StringPiece variant) U_LIFETIME_BOUND
 {
     if (U_FAILURE(status_)) { return *this; }
     if (variant.empty()) {
@@ -117,14 +132,13 @@ LocaleBuilder& LocaleBuilder::setVariant(StringPiece variant)
         variant_ = nullptr;
         return *this;
     }
-    CharString* new_variant = new CharString(variant, status_);
-    if (U_FAILURE(status_)) { return *this; }
-    if (new_variant == nullptr) {
+    FixedString* new_variant = new FixedString(variant);
+    if (new_variant == nullptr || new_variant->isEmpty()) {
         status_ = U_MEMORY_ALLOCATION_ERROR;
         return *this;
     }
-    transform(new_variant->data(), new_variant->length());
-    if (!ultag_isVariantSubtags(new_variant->data(), new_variant->length())) {
+    transform(new_variant->getAlias(), variant.length());
+    if (!ultag_isVariantSubtags(new_variant->data(), variant.length())) {
         delete new_variant;
         status_ = U_ILLEGAL_ARGUMENT_ERROR;
         return *this;
@@ -134,7 +148,9 @@ LocaleBuilder& LocaleBuilder::setVariant(StringPiece variant)
     return *this;
 }
 
-static bool
+namespace {
+
+bool
 _isKeywordValue(const char* key, const char* value, int32_t value_len)
 {
     if (key[1] == '\0') {
@@ -148,15 +164,18 @@ _isKeywordValue(const char* key, const char* value, int32_t value_len)
     // otherwise: unicode extension value
     // We need to convert from legacy key/value to unicode
     // key/value
-    const char* unicode_locale_key = uloc_toUnicodeLocaleKey(key);
-    const char* unicode_locale_type = uloc_toUnicodeLocaleType(key, value);
+    std::optional<std::string_view> unicode_locale_key = ulocimp_toBcpKeyWithFallback(key);
+    std::optional<std::string_view> unicode_locale_type = ulocimp_toBcpTypeWithFallback(key, value);
 
-    return unicode_locale_key && unicode_locale_type &&
-           ultag_isUnicodeLocaleKey(unicode_locale_key, -1) &&
-           ultag_isUnicodeLocaleType(unicode_locale_type, -1);
+    return unicode_locale_key.has_value() &&
+           unicode_locale_type.has_value() &&
+           ultag_isUnicodeLocaleKey(unicode_locale_key->data(),
+                                    static_cast<int32_t>(unicode_locale_key->size())) &&
+           ultag_isUnicodeLocaleType(unicode_locale_type->data(),
+                                     static_cast<int32_t>(unicode_locale_type->size()));
 }
 
-static void
+void
 _copyExtensions(const Locale& from, icu::StringEnumeration *keywords,
                 Locale& to, bool validate, UErrorCode& errorCode)
 {
@@ -169,9 +188,7 @@ _copyExtensions(const Locale& from, icu::StringEnumeration *keywords,
     }
     const char* key;
     while ((key = keywords->next(nullptr, errorCode)) != nullptr) {
-        CharString value;
-        CharStringByteSink sink(&value);
-        from.getKeywordValue(key, sink, errorCode);
+        auto value = from.getKeywordValue<CharString>(key, errorCode);
         if (U_FAILURE(errorCode)) { return; }
         if (uprv_strcmp(key, kAttributeKey) == 0) {
             transform(value.data(), value.length());
@@ -186,9 +203,10 @@ _copyExtensions(const Locale& from, icu::StringEnumeration *keywords,
     }
 }
 
-void static
+void
 _clearUAttributesAndKeyType(Locale& locale, UErrorCode& errorCode)
 {
+    if (U_FAILURE(errorCode)) { return; }
     // Clear Unicode attributes
     locale.setKeywordValue(kAttributeKey, "", errorCode);
 
@@ -201,9 +219,10 @@ _clearUAttributesAndKeyType(Locale& locale, UErrorCode& errorCode)
     }
 }
 
-static void
+void
 _setUnicodeExtensions(Locale& locale, const CharString& value, UErrorCode& errorCode)
 {
+    if (U_FAILURE(errorCode)) { return; }
     // Add the unicode extensions to extensions_
     CharString locale_str("und-u-", errorCode);
     locale_str.append(value, errorCode);
@@ -212,7 +231,9 @@ _setUnicodeExtensions(Locale& locale, const CharString& value, UErrorCode& error
         locale, false, errorCode);
 }
 
-LocaleBuilder& LocaleBuilder::setExtension(char key, StringPiece value)
+}  // namespace
+
+LocaleBuilder& LocaleBuilder::setExtension(char key, StringPiece value) U_LIFETIME_BOUND
 {
     if (U_FAILURE(status_)) { return *this; }
     if (!UPRV_ISALPHANUM(key)) {
@@ -248,8 +269,8 @@ LocaleBuilder& LocaleBuilder::setExtension(char key, StringPiece value)
     return *this;
 }
 
-LocaleBuilder& LocaleBuilder::setUnicodeLocaleKeyword(
-      StringPiece key, StringPiece type)
+LocaleBuilder& LocaleBuilder::setUnicodeLocaleKeyword(StringPiece key,
+                                                      StringPiece type) U_LIFETIME_BOUND
 {
     if (U_FAILURE(status_)) { return *this; }
     if (!ultag_isUnicodeLocaleKey(key.data(), key.length()) ||
@@ -269,8 +290,7 @@ LocaleBuilder& LocaleBuilder::setUnicodeLocaleKeyword(
     return *this;
 }
 
-LocaleBuilder& LocaleBuilder::addUnicodeLocaleAttribute(
-    StringPiece value)
+LocaleBuilder& LocaleBuilder::addUnicodeLocaleAttribute(StringPiece value) U_LIFETIME_BOUND
 {
     CharString value_str(value, status_);
     if (U_FAILURE(status_)) { return *this; }
@@ -289,10 +309,8 @@ LocaleBuilder& LocaleBuilder::addUnicodeLocaleAttribute(
         return *this;
     }
 
-    CharString attributes;
-    CharStringByteSink sink(&attributes);
     UErrorCode localErrorCode = U_ZERO_ERROR;
-    extensions_->getKeywordValue(kAttributeKey, sink, localErrorCode);
+    auto attributes = extensions_->getKeywordValue<CharString>(kAttributeKey, localErrorCode);
     if (U_FAILURE(localErrorCode)) {
         CharString new_attributes(value_str.data(), status_);
         // No attributes, set the attribute.
@@ -332,8 +350,7 @@ LocaleBuilder& LocaleBuilder::addUnicodeLocaleAttribute(
     return *this;
 }
 
-LocaleBuilder& LocaleBuilder::removeUnicodeLocaleAttribute(
-    StringPiece value)
+LocaleBuilder& LocaleBuilder::removeUnicodeLocaleAttribute(StringPiece value) U_LIFETIME_BOUND
 {
     CharString value_str(value, status_);
     if (U_FAILURE(status_)) { return *this; }
@@ -344,9 +361,7 @@ LocaleBuilder& LocaleBuilder::removeUnicodeLocaleAttribute(
     }
     if (extensions_ == nullptr) { return *this; }
     UErrorCode localErrorCode = U_ZERO_ERROR;
-    CharString attributes;
-    CharStringByteSink sink(&attributes);
-    extensions_->getKeywordValue(kAttributeKey, sink, localErrorCode);
+    auto attributes = extensions_->getKeywordValue<CharString>(kAttributeKey, localErrorCode);
     // get failure, just return
     if (U_FAILURE(localErrorCode)) { return *this; }
     // Do not have any attributes, just return.
@@ -381,7 +396,7 @@ LocaleBuilder& LocaleBuilder::removeUnicodeLocaleAttribute(
     return *this;
 }
 
-LocaleBuilder& LocaleBuilder::clear()
+LocaleBuilder& LocaleBuilder::clear() U_LIFETIME_BOUND
 {
     status_ = U_ZERO_ERROR;
     language_[0] = 0;
@@ -393,7 +408,7 @@ LocaleBuilder& LocaleBuilder::clear()
     return *this;
 }
 
-LocaleBuilder& LocaleBuilder::clearExtensions()
+LocaleBuilder& LocaleBuilder::clearExtensions() U_LIFETIME_BOUND
 {
     delete extensions_;
     extensions_ = nullptr;
@@ -459,7 +474,7 @@ Locale LocaleBuilder::build(UErrorCode& errorCode)
 UBool LocaleBuilder::copyErrorTo(UErrorCode &outErrorCode) const {
     if (U_FAILURE(outErrorCode)) {
         // Do not overwrite the older error code
-        return TRUE;
+        return true;
     }
     outErrorCode = status_;
     return U_FAILURE(outErrorCode);

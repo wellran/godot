@@ -1,168 +1,204 @@
-/*************************************************************************/
-/*  string_name.cpp                                                      */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  string_name.cpp                                                       */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
 #include "string_name.h"
 
+#include "core/os/mutex.h"
 #include "core/os/os.h"
 #include "core/string/print_string.h"
+#include "core/templates/paged_allocator.h"
 
-StaticCString StaticCString::create(const char *p_ptr) {
-	StaticCString scs;
-	scs.ptr = p_ptr;
-	return scs;
-}
+const StringName StringName::EMPTY;
 
-StringName::_Data *StringName::_table[STRING_TABLE_LEN];
+struct StringName::Table {
+	constexpr static uint32_t TABLE_BITS = 16;
+	constexpr static uint32_t TABLE_LEN = 1 << TABLE_BITS;
+	constexpr static uint32_t TABLE_MASK = TABLE_LEN - 1;
 
-StringName _scs_create(const char *p_chr, bool p_static) {
-	return (p_chr[0] ? StringName(StaticCString::create(p_chr), p_static) : StringName());
-}
+	static _Data *table[TABLE_LEN];
+	static BinaryMutex mutex;
+	static PagedAllocator<_Data> allocator;
+	static bool configured;
+};
 
-bool StringName::configured = false;
-Mutex StringName::mutex;
-
-#ifdef DEBUG_ENABLED
-bool StringName::debug_stringname = false;
-#endif
+// Defined out-of-class instead of using static inline so the compiler can
+// place the table in the zero-fill region (.bss) instead of the initialized
+// data section (.data). Because the zero-fill region is allocated at runtime,
+// this shrinks the binary size on disk.
+StringName::_Data *StringName::Table::table[TABLE_LEN];
+BinaryMutex StringName::Table::mutex;
+PagedAllocator<StringName::_Data> StringName::Table::allocator;
+bool StringName::Table::configured = false;
 
 void StringName::setup() {
-	ERR_FAIL_COND(configured);
-	for (int i = 0; i < STRING_TABLE_LEN; i++) {
-		_table[i] = nullptr;
+	ERR_FAIL_COND(Table::configured);
+	for (uint32_t i = 0; i < Table::TABLE_LEN; i++) {
+		Table::table[i] = nullptr;
 	}
-	configured = true;
+	Table::configured = true;
 }
 
 void StringName::cleanup() {
-	MutexLock lock(mutex);
+	MutexLock lock(Table::mutex);
 
 #ifdef DEBUG_ENABLED
 	if (unlikely(debug_stringname)) {
 		Vector<_Data *> data;
-		for (int i = 0; i < STRING_TABLE_LEN; i++) {
-			_Data *d = _table[i];
+		for (uint32_t i = 0; i < Table::TABLE_LEN; i++) {
+			_Data *d = Table::table[i];
 			while (d) {
 				data.push_back(d);
 				d = d->next;
 			}
 		}
-		print_line("\nStringName Reference Ranking:\n");
+
+		print_line("\nStringName reference ranking (from most to least referenced):\n");
+
 		data.sort_custom<DebugSortReferences>();
-		for (int i = 0; i < MIN(100, data.size()); i++) {
-			print_line(itos(i + 1) + ": " + data[i]->get_name() + " - " + itos(data[i]->debug_references));
+		int unreferenced_stringnames = 0;
+		int rarely_referenced_stringnames = 0;
+		const int data_size = data.size();
+		for (int i = 0; i < data_size; i++) {
+			print_line(itos(i + 1) + ": " + data[i]->name + " - " + itos(data[i]->debug_references));
+			if (data[i]->debug_references == 0) {
+				unreferenced_stringnames += 1;
+			} else if (data[i]->debug_references < 5) {
+				rarely_referenced_stringnames += 1;
+			}
 		}
+
+		print_line(vformat("\nOut of %d StringNames, %d StringNames were never referenced during this run (0 times) (%.2f%%).", data_size, unreferenced_stringnames, unreferenced_stringnames / float(data_size) * 100));
+		print_line(vformat("Out of %d StringNames, %d StringNames were rarely referenced during this run (1-4 times) (%.2f%%).", data_size, rarely_referenced_stringnames, rarely_referenced_stringnames / float(data_size) * 100));
 	}
 #endif
 	int lost_strings = 0;
-	for (int i = 0; i < STRING_TABLE_LEN; i++) {
-		while (_table[i]) {
-			_Data *d = _table[i];
-			lost_strings++;
-			if (d->static_count.get() != d->refcount.get() && OS::get_singleton()->is_stdout_verbose()) {
-				if (d->cname) {
-					print_line("Orphan StringName: " + String(d->cname));
-				} else {
-					print_line("Orphan StringName: " + String(d->name));
+	for (uint32_t i = 0; i < Table::TABLE_LEN; i++) {
+		while (Table::table[i]) {
+			_Data *d = Table::table[i];
+			if (d->static_count.get() != d->refcount.get()) {
+				lost_strings++;
+
+				if (OS::get_singleton()->is_stdout_verbose()) {
+					print_line(vformat("Orphan StringName: %s (static: %d, total: %d)", d->name, d->static_count.get(), d->refcount.get()));
 				}
 			}
 
-			_table[i] = _table[i]->next;
-			memdelete(d);
+			Table::table[i] = Table::table[i]->next;
+			Table::allocator.free(d);
 		}
 	}
 	if (lost_strings) {
-		print_verbose("StringName: " + itos(lost_strings) + " unclaimed string names at exit.");
+		print_verbose(vformat("StringName: %d unclaimed string names at exit.", lost_strings));
 	}
-	configured = false;
+	Table::configured = false;
 }
 
 void StringName::unref() {
-	ERR_FAIL_COND(!configured);
+	if (unlikely(!Table::configured)) {
+		// Most likely tearing down. It's possible someone is genuinely
+		// misusing StringName, but they'll hopefully know soon enough
+		// without us printing because something down the line breaks.
+		return;
+	}
 
 	if (_data && _data->refcount.unref()) {
-		MutexLock lock(mutex);
+		MutexLock lock(Table::mutex);
 
-		if (_data->static_count.get() > 0) {
-			if (_data->cname) {
-				ERR_PRINT("BUG: Unreferenced static string to 0: " + String(_data->cname));
-			} else {
-				ERR_PRINT("BUG: Unreferenced static string to 0: " + String(_data->name));
-			}
+		if (CoreGlobals::leak_reporting_enabled && _data->static_count.get() > 0) {
+			ERR_PRINT("BUG: Unreferenced static string to 0: " + _data->name);
 		}
 		if (_data->prev) {
 			_data->prev->next = _data->next;
 		} else {
-			if (_table[_data->idx] != _data) {
-				ERR_PRINT("BUG!");
-			}
-			_table[_data->idx] = _data->next;
+			const uint32_t idx = _data->hash & Table::TABLE_MASK;
+			Table::table[idx] = _data->next;
 		}
 
 		if (_data->next) {
 			_data->next->prev = _data->prev;
 		}
-		memdelete(_data);
+		Table::allocator.free(_data);
 	}
 
 	_data = nullptr;
 }
 
+uint32_t StringName::get_empty_hash() {
+	static uint32_t empty_hash = String::hash("");
+	return empty_hash;
+}
+
 bool StringName::operator==(const String &p_name) const {
-	if (!_data) {
-		return (p_name.length() == 0);
+	if (_data) {
+		return _data->name == p_name;
 	}
 
-	return (_data->get_name() == p_name);
+	return p_name.is_empty();
 }
 
 bool StringName::operator==(const char *p_name) const {
-	if (!_data) {
-		return (p_name[0] == 0);
+	if (_data) {
+		return _data->name == p_name;
 	}
 
-	return (_data->get_name() == p_name);
+	return p_name[0] == 0;
 }
 
 bool StringName::operator!=(const String &p_name) const {
 	return !(operator==(p_name));
 }
 
-bool StringName::operator!=(const StringName &p_name) const {
-	// the real magic of all this mess happens here.
-	// this is why path comparisons are very fast
-	return _data != p_name._data;
+bool StringName::operator!=(const char *p_name) const {
+	return !(operator==(p_name));
 }
 
-void StringName::operator=(const StringName &p_name) {
+char32_t StringName::operator[](int p_index) const {
+	if (_data) {
+		return _data->name[p_index];
+	}
+
+	CRASH_BAD_INDEX(p_index, 0);
+	return 0;
+}
+
+int StringName::length() const {
+	if (_data) {
+		return _data->name.length();
+	}
+
+	return 0;
+}
+
+StringName &StringName::operator=(const StringName &p_name) {
 	if (this == &p_name) {
-		return;
+		return *this;
 	}
 
 	unref();
@@ -170,12 +206,14 @@ void StringName::operator=(const StringName &p_name) {
 	if (p_name._data && p_name._data->refcount.ref()) {
 		_data = p_name._data;
 	}
+
+	return *this;
 }
 
 StringName::StringName(const StringName &p_name) {
 	_data = nullptr;
 
-	ERR_FAIL_COND(!configured);
+	ERR_FAIL_COND(!Table::configured);
 
 	if (p_name._data && p_name._data->refcount.ref()) {
 		_data = p_name._data;
@@ -185,53 +223,47 @@ StringName::StringName(const StringName &p_name) {
 StringName::StringName(const char *p_name, bool p_static) {
 	_data = nullptr;
 
-	ERR_FAIL_COND(!configured);
+	ERR_FAIL_COND(!Table::configured);
 
 	if (!p_name || p_name[0] == 0) {
 		return; //empty, ignore
 	}
 
-	MutexLock lock(mutex);
+	const uint32_t hash = String::hash(p_name);
+	const uint32_t idx = hash & Table::TABLE_MASK;
 
-	uint32_t hash = String::hash(p_name);
-
-	uint32_t idx = hash & STRING_TABLE_MASK;
-
-	_data = _table[idx];
+	MutexLock lock(Table::mutex);
+	_data = Table::table[idx];
 
 	while (_data) {
 		// compare hash first
-		if (_data->hash == hash && _data->get_name() == p_name) {
+		if (_data->hash == hash && _data->name == p_name) {
 			break;
 		}
 		_data = _data->next;
 	}
 
-	if (_data) {
-		if (_data->refcount.ref()) {
-			// exists
-			if (p_static) {
-				_data->static_count.increment();
-			}
-#ifdef DEBUG_ENABLED
-			if (unlikely(debug_stringname)) {
-				_data->debug_references++;
-			}
-#endif
+	if (_data && _data->refcount.ref()) {
+		// exists
+		if (p_static) {
+			_data->static_count.increment();
 		}
-
+#ifdef DEBUG_ENABLED
+		if (unlikely(debug_stringname)) {
+			_data->debug_references++;
+		}
+#endif
 		return;
 	}
 
-	_data = memnew(_Data);
+	_data = Table::allocator.alloc();
 	_data->name = p_name;
 	_data->refcount.init();
 	_data->static_count.set(p_static ? 1 : 0);
 	_data->hash = hash;
-	_data->idx = idx;
-	_data->cname = nullptr;
-	_data->next = _table[idx];
+	_data->next = Table::table[idx];
 	_data->prev = nullptr;
+
 #ifdef DEBUG_ENABLED
 	if (unlikely(debug_stringname)) {
 		// Keep in memory, force static.
@@ -239,118 +271,53 @@ StringName::StringName(const char *p_name, bool p_static) {
 		_data->static_count.increment();
 	}
 #endif
-	if (_table[idx]) {
-		_table[idx]->prev = _data;
+	if (Table::table[idx]) {
+		Table::table[idx]->prev = _data;
 	}
-	_table[idx] = _data;
-}
-
-StringName::StringName(const StaticCString &p_static_string, bool p_static) {
-	_data = nullptr;
-
-	ERR_FAIL_COND(!configured);
-
-	ERR_FAIL_COND(!p_static_string.ptr || !p_static_string.ptr[0]);
-
-	MutexLock lock(mutex);
-
-	uint32_t hash = String::hash(p_static_string.ptr);
-
-	uint32_t idx = hash & STRING_TABLE_MASK;
-
-	_data = _table[idx];
-
-	while (_data) {
-		// compare hash first
-		if (_data->hash == hash && _data->get_name() == p_static_string.ptr) {
-			break;
-		}
-		_data = _data->next;
-	}
-
-	if (_data) {
-		if (_data->refcount.ref()) {
-			// exists
-			if (p_static) {
-				_data->static_count.increment();
-			}
-#ifdef DEBUG_ENABLED
-			if (unlikely(debug_stringname)) {
-				_data->debug_references++;
-			}
-#endif
-			return;
-		}
-	}
-
-	_data = memnew(_Data);
-
-	_data->refcount.init();
-	_data->static_count.set(p_static ? 1 : 0);
-	_data->hash = hash;
-	_data->idx = idx;
-	_data->cname = p_static_string.ptr;
-	_data->next = _table[idx];
-	_data->prev = nullptr;
-#ifdef DEBUG_ENABLED
-	if (unlikely(debug_stringname)) {
-		// Keep in memory, force static.
-		_data->refcount.ref();
-		_data->static_count.increment();
-	}
-#endif
-	if (_table[idx]) {
-		_table[idx]->prev = _data;
-	}
-	_table[idx] = _data;
+	Table::table[idx] = _data;
 }
 
 StringName::StringName(const String &p_name, bool p_static) {
 	_data = nullptr;
 
-	ERR_FAIL_COND(!configured);
+	ERR_FAIL_COND(!Table::configured);
 
-	if (p_name == String()) {
+	if (p_name.is_empty()) {
 		return;
 	}
 
-	MutexLock lock(mutex);
+	const uint32_t hash = p_name.hash();
+	const uint32_t idx = hash & Table::TABLE_MASK;
 
-	uint32_t hash = p_name.hash();
-	uint32_t idx = hash & STRING_TABLE_MASK;
-
-	_data = _table[idx];
+	MutexLock lock(Table::mutex);
+	_data = Table::table[idx];
 
 	while (_data) {
-		if (_data->hash == hash && _data->get_name() == p_name) {
+		if (_data->hash == hash && _data->name == p_name) {
 			break;
 		}
 		_data = _data->next;
 	}
 
-	if (_data) {
-		if (_data->refcount.ref()) {
-			// exists
-			if (p_static) {
-				_data->static_count.increment();
-			}
-#ifdef DEBUG_ENABLED
-			if (unlikely(debug_stringname)) {
-				_data->debug_references++;
-			}
-#endif
-			return;
+	if (_data && _data->refcount.ref()) {
+		// exists
+		if (p_static) {
+			_data->static_count.increment();
 		}
+#ifdef DEBUG_ENABLED
+		if (unlikely(debug_stringname)) {
+			_data->debug_references++;
+		}
+#endif
+		return;
 	}
 
-	_data = memnew(_Data);
+	_data = Table::allocator.alloc();
 	_data->name = p_name;
 	_data->refcount.init();
 	_data->static_count.set(p_static ? 1 : 0);
 	_data->hash = hash;
-	_data->idx = idx;
-	_data->cname = nullptr;
-	_data->next = _table[idx];
+	_data->next = Table::table[idx];
 	_data->prev = nullptr;
 #ifdef DEBUG_ENABLED
 	if (unlikely(debug_stringname)) {
@@ -360,120 +327,22 @@ StringName::StringName(const String &p_name, bool p_static) {
 	}
 #endif
 
-	if (_table[idx]) {
-		_table[idx]->prev = _data;
+	if (Table::table[idx]) {
+		Table::table[idx]->prev = _data;
 	}
-	_table[idx] = _data;
-}
-
-StringName StringName::search(const char *p_name) {
-	ERR_FAIL_COND_V(!configured, StringName());
-
-	ERR_FAIL_COND_V(!p_name, StringName());
-	if (!p_name[0]) {
-		return StringName();
-	}
-
-	MutexLock lock(mutex);
-
-	uint32_t hash = String::hash(p_name);
-	uint32_t idx = hash & STRING_TABLE_MASK;
-
-	_Data *_data = _table[idx];
-
-	while (_data) {
-		// compare hash first
-		if (_data->hash == hash && _data->get_name() == p_name) {
-			break;
-		}
-		_data = _data->next;
-	}
-
-	if (_data && _data->refcount.ref()) {
-#ifdef DEBUG_ENABLED
-		if (unlikely(debug_stringname)) {
-			_data->debug_references++;
-		}
-#endif
-
-		return StringName(_data);
-	}
-
-	return StringName(); //does not exist
-}
-
-StringName StringName::search(const char32_t *p_name) {
-	ERR_FAIL_COND_V(!configured, StringName());
-
-	ERR_FAIL_COND_V(!p_name, StringName());
-	if (!p_name[0]) {
-		return StringName();
-	}
-
-	MutexLock lock(mutex);
-
-	uint32_t hash = String::hash(p_name);
-
-	uint32_t idx = hash & STRING_TABLE_MASK;
-
-	_Data *_data = _table[idx];
-
-	while (_data) {
-		// compare hash first
-		if (_data->hash == hash && _data->get_name() == p_name) {
-			break;
-		}
-		_data = _data->next;
-	}
-
-	if (_data && _data->refcount.ref()) {
-		return StringName(_data);
-	}
-
-	return StringName(); //does not exist
-}
-
-StringName StringName::search(const String &p_name) {
-	ERR_FAIL_COND_V(p_name == "", StringName());
-
-	MutexLock lock(mutex);
-
-	uint32_t hash = p_name.hash();
-
-	uint32_t idx = hash & STRING_TABLE_MASK;
-
-	_Data *_data = _table[idx];
-
-	while (_data) {
-		// compare hash first
-		if (_data->hash == hash && p_name == _data->get_name()) {
-			break;
-		}
-		_data = _data->next;
-	}
-
-	if (_data && _data->refcount.ref()) {
-#ifdef DEBUG_ENABLED
-		if (unlikely(debug_stringname)) {
-			_data->debug_references++;
-		}
-#endif
-		return StringName(_data);
-	}
-
-	return StringName(); //does not exist
+	Table::table[idx] = _data;
 }
 
 bool operator==(const String &p_name, const StringName &p_string_name) {
-	return p_name == p_string_name.operator String();
+	return p_string_name.operator==(p_name);
 }
 bool operator!=(const String &p_name, const StringName &p_string_name) {
-	return p_name != p_string_name.operator String();
+	return p_string_name.operator!=(p_name);
 }
 
 bool operator==(const char *p_name, const StringName &p_string_name) {
-	return p_name == p_string_name.operator String();
+	return p_string_name.operator==(p_name);
 }
 bool operator!=(const char *p_name, const StringName &p_string_name) {
-	return p_name != p_string_name.operator String();
+	return p_string_name.operator!=(p_name);
 }

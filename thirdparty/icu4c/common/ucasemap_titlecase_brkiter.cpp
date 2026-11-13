@@ -66,7 +66,7 @@ int32_t CaseMap::utf8ToTitle(
     utext_openUTF8(&utext, src, srcLength, &errorCode);
     LocalPointer<BreakIterator> ownedIter;
     iter = ustrcase_getTitleBreakIterator(nullptr, locale, options, iter, ownedIter, errorCode);
-    if(iter==NULL) {
+    if(iter==nullptr) {
         utext_close(&utext);
         return 0;
     }
@@ -84,9 +84,10 @@ U_NAMESPACE_END
 
 U_NAMESPACE_USE
 
-U_CAPI const UBreakIterator * U_EXPORT2
-ucasemap_getBreakIterator(const UCaseMap *csm) {
-    return reinterpret_cast<UBreakIterator *>(csm->iter);
+U_CAPI const UBreakIterator* U_EXPORT2
+ucasemap_getBreakIterator(const UCaseMap* csm U_LIFETIME_BOUND) {
+    auto *impl = reinterpret_cast<const UCaseMapImpl *>(csm);
+    return reinterpret_cast<UBreakIterator *>(impl->iter);
 }
 
 U_CAPI void U_EXPORT2
@@ -94,8 +95,9 @@ ucasemap_setBreakIterator(UCaseMap *csm, UBreakIterator *iterToAdopt, UErrorCode
     if(U_FAILURE(*pErrorCode)) {
         return;
     }
-    delete csm->iter;
-    csm->iter=reinterpret_cast<BreakIterator *>(iterToAdopt);
+    auto *impl = reinterpret_cast<UCaseMapImpl *>(csm);
+    delete impl->iter;
+    impl->iter=reinterpret_cast<BreakIterator *>(iterToAdopt);
 }
 
 U_CAPI int32_t U_EXPORT2
@@ -107,26 +109,27 @@ ucasemap_utf8ToTitle(UCaseMap *csm,
         return 0;
     }
     UText utext=UTEXT_INITIALIZER;
-    utext_openUTF8(&utext, (const char *)src, srcLength, pErrorCode);
+    utext_openUTF8(&utext, src, srcLength, pErrorCode);
     if (U_FAILURE(*pErrorCode)) {
         return 0;
     }
-    if(csm->iter==NULL) {
+    auto *impl = reinterpret_cast<UCaseMapImpl *>(csm);
+    if(impl->iter==nullptr) {
         LocalPointer<BreakIterator> ownedIter;
         BreakIterator *iter = ustrcase_getTitleBreakIterator(
-            nullptr, csm->locale, csm->options, nullptr, ownedIter, *pErrorCode);
+            nullptr, impl->locale, impl->options, nullptr, ownedIter, *pErrorCode);
         if (iter == nullptr) {
             utext_close(&utext);
             return 0;
         }
-        csm->iter = ownedIter.orphan();
+        impl->iter = ownedIter.orphan();
     }
-    csm->iter->setText(&utext, *pErrorCode);
+    impl->iter->setText(&utext, *pErrorCode);
     int32_t length=ucasemap_mapUTF8(
-            csm->caseLocale, csm->options, csm->iter,
+            impl->caseLocale, impl->options, impl->iter,
             dest, destCapacity,
             src, srcLength,
-            ucasemap_internalUTF8ToTitle, NULL, *pErrorCode);
+            ucasemap_internalUTF8ToTitle, nullptr, *pErrorCode);
     utext_close(&utext);
     return length;
 }

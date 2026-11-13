@@ -1,41 +1,51 @@
-/*************************************************************************/
-/*  self_list.h                                                          */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  self_list.h                                                           */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
-#ifndef SELF_LIST_H
-#define SELF_LIST_H
+#pragma once
 
 #include "core/error/error_macros.h"
+#include "core/templates/sort_list.h"
 #include "core/typedefs.h"
 
-template <class T>
-class SelfList {
+/**
+ * A doubly linked list, implemented by storing the previous and next
+ * pointer in each element rather than a separate allocation.
+ *
+ * This class is not trivially relocatable, which makes
+ * usage like `Vector<SelfList<T>>` impossible (see GH-100509).
+ *
+ * Core container guidance:
+ * https://docs.godotengine.org/en/latest/engine_details/architecture/core_types.html#containers
+ */
+template <typename T>
+class _WARN_UNUSED_ SelfList {
 public:
 	class List {
 		SelfList<T> *_first = nullptr;
@@ -99,18 +109,112 @@ public:
 			p_elem->_root = nullptr;
 		}
 
+		void clear() {
+			while (_first) {
+				remove(_first);
+			}
+		}
+
+		void sort() {
+			sort_custom<Comparator<T>>();
+		}
+
+		template <typename C>
+		void sort_custom() {
+			if (_first == _last) {
+				return;
+			}
+
+			struct PtrComparator {
+				C compare;
+				_FORCE_INLINE_ bool operator()(const T *p_a, const T *p_b) const { return compare(*p_a, *p_b); }
+			};
+			using Element = SelfList<T>;
+			SortList<Element, T *, _self_ref, _prev_ref, _next_ref, PtrComparator> sorter;
+			sorter.sort(_first, _last);
+		}
+
+		struct ConstIterator {
+			_FORCE_INLINE_ const T &operator*() const { return *E->self(); }
+			_FORCE_INLINE_ const T *operator->() const { return E->self(); }
+
+			_FORCE_INLINE_ ConstIterator &operator++() {
+				E = E->next();
+				return *this;
+			}
+
+			_FORCE_INLINE_ ConstIterator &operator--() {
+				E = E->prev();
+				return *this;
+			}
+
+			_FORCE_INLINE_ bool operator==(const ConstIterator &p_other) const { return E == p_other.E; }
+			_FORCE_INLINE_ bool operator!=(const ConstIterator &p_other) const { return E != p_other.E; }
+
+			_FORCE_INLINE_ ConstIterator(const SelfList<T> *p_elem) { E = p_elem; }
+			_FORCE_INLINE_ ConstIterator() {}
+			_FORCE_INLINE_ ConstIterator(const ConstIterator &p_it) { E = p_it.E; }
+
+		private:
+			const SelfList<T> *E = nullptr;
+		};
+
+		struct Iterator {
+			_FORCE_INLINE_ T &operator*() const { return *E->self(); }
+			_FORCE_INLINE_ T *operator->() const { return E->self(); }
+
+			_FORCE_INLINE_ Iterator &operator++() {
+				E = E->next();
+				return *this;
+			}
+
+			_FORCE_INLINE_ Iterator &operator--() {
+				E = E->prev();
+				return *this;
+			}
+
+			_FORCE_INLINE_ bool operator==(const Iterator &p_other) const { return E == p_other.E; }
+			_FORCE_INLINE_ bool operator!=(const Iterator &p_other) const { return E != p_other.E; }
+
+			Iterator(SelfList<T> *p_elem) { E = p_elem; }
+			Iterator() {}
+			Iterator(const Iterator &p_it) { E = p_it.E; }
+
+			operator ConstIterator() const {
+				return ConstIterator(E);
+			}
+
+		private:
+			SelfList<T> *E = nullptr;
+		};
+
+		_FORCE_INLINE_ Iterator begin() { return Iterator(first()); }
+		_FORCE_INLINE_ Iterator end() { return Iterator(nullptr); }
+
+		_FORCE_INLINE_ ConstIterator begin() const { return ConstIterator(first()); }
+		_FORCE_INLINE_ ConstIterator end() const { return ConstIterator(nullptr); }
+
 		_FORCE_INLINE_ SelfList<T> *first() { return _first; }
 		_FORCE_INLINE_ const SelfList<T> *first() const { return _first; }
 
-		_FORCE_INLINE_ List() {}
-		_FORCE_INLINE_ ~List() { ERR_FAIL_COND(_first != nullptr); }
+		// Forbid copying, which has broken behavior.
+		void operator=(const List &) = delete;
+
+		_FORCE_INLINE_ ~List() {
+			// A self list must be empty on destruction.
+			DEV_ASSERT(_first == nullptr);
+		}
 	};
 
 private:
 	List *_root = nullptr;
-	T *_self;
+	T *_self = nullptr;
 	SelfList<T> *_next = nullptr;
 	SelfList<T> *_prev = nullptr;
+	// Specify pointers in variables to work around a VS 2022 bug (GH-121326).
+	static constexpr T *SelfList<T>::*_self_ref = &SelfList<T>::_self;
+	static constexpr SelfList<T> *SelfList<T>::*_prev_ref = &SelfList<T>::_prev;
+	static constexpr SelfList<T> *SelfList<T>::*_next_ref = &SelfList<T>::_next;
 
 public:
 	_FORCE_INLINE_ bool in_list() const { return _root; }
@@ -125,6 +229,9 @@ public:
 	_FORCE_INLINE_ const SelfList<T> *prev() const { return _prev; }
 	_FORCE_INLINE_ T *self() const { return _self; }
 
+	// Forbid copying, which has broken behavior.
+	void operator=(const SelfList<T> &) = delete;
+
 	_FORCE_INLINE_ SelfList(T *p_self) {
 		_self = p_self;
 	}
@@ -135,5 +242,3 @@ public:
 		}
 	}
 };
-
-#endif // SELF_LIST_H

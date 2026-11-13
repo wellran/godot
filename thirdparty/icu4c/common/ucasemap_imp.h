@@ -10,6 +10,7 @@
 #include "unicode/utypes.h"
 #include "unicode/ucasemap.h"
 #include "unicode/uchar.h"
+#include "unicode/unistr.h"  // for UStringCaseMapper
 #include "ucase.h"
 
 /**
@@ -92,25 +93,24 @@ inline UBool ustrcase_isLNS(UChar32 c) {
 
 /** Returns nullptr if error. Pass in either locale or locID, not both. */
 U_CFUNC
-BreakIterator *ustrcase_getTitleBreakIterator(
-        const Locale *locale, const char *locID, uint32_t options, BreakIterator *iter,
-        LocalPointer<BreakIterator> &ownedIter, UErrorCode &errorCode);
+BreakIterator* ustrcase_getTitleBreakIterator(const Locale* locale,
+                                              const char* locID,
+                                              uint32_t options,
+                                              BreakIterator* iter U_LIFETIME_BOUND,
+                                              LocalPointer<BreakIterator>& ownedIter,
+                                              UErrorCode& errorCode);
 
 #endif
-
-U_NAMESPACE_END
-
-#include "unicode/unistr.h"  // for UStringCaseMapper
 
 /*
  * Internal string casing functions implementing
  * ustring.h/ustrcase.cpp and UnicodeString case mapping functions.
  */
 
-struct UCaseMap : public icu::UMemory {
+struct UCaseMapImpl : public icu::UMemory {
     /** Implements most of ucasemap_open(). */
-    UCaseMap(const char *localeID, uint32_t opts, UErrorCode *pErrorCode);
-    ~UCaseMap();
+    UCaseMapImpl(const char *localeID, uint32_t opts, UErrorCode *pErrorCode);
+    ~UCaseMapImpl();
 
 #if !UCONFIG_NO_BREAK_ITERATION
     icu::BreakIterator *iter;  /* We adopt the iterator, so we own it. */
@@ -119,6 +119,8 @@ struct UCaseMap : public icu::UMemory {
     int32_t caseLocale;
     uint32_t options;
 };
+
+U_NAMESPACE_END
 
 #if UCONFIG_NO_BREAK_ITERATION
 #   define UCASEMAP_BREAK_ITERATOR_PARAM
@@ -139,16 +141,16 @@ ustrcase_getCaseLocale(const char *locale);
 /** Implements UStringCaseMapper. */
 U_CFUNC int32_t U_CALLCONV
 ustrcase_internalToLower(int32_t caseLocale, uint32_t options, UCASEMAP_BREAK_ITERATOR_PARAM
-                         UChar *dest, int32_t destCapacity,
-                         const UChar *src, int32_t srcLength,
+                         char16_t *dest, int32_t destCapacity,
+                         const char16_t *src, int32_t srcLength,
                          icu::Edits *edits,
                          UErrorCode &errorCode);
 
 /** Implements UStringCaseMapper. */
 U_CFUNC int32_t U_CALLCONV
 ustrcase_internalToUpper(int32_t caseLocale, uint32_t options, UCASEMAP_BREAK_ITERATOR_PARAM
-                         UChar *dest, int32_t destCapacity,
-                         const UChar *src, int32_t srcLength,
+                         char16_t *dest, int32_t destCapacity,
+                         const char16_t *src, int32_t srcLength,
                          icu::Edits *edits,
                          UErrorCode &errorCode);
 
@@ -158,8 +160,8 @@ ustrcase_internalToUpper(int32_t caseLocale, uint32_t options, UCASEMAP_BREAK_IT
 U_CFUNC int32_t U_CALLCONV
 ustrcase_internalToTitle(int32_t caseLocale, uint32_t options,
                          icu::BreakIterator *iter,
-                         UChar *dest, int32_t destCapacity,
-                         const UChar *src, int32_t srcLength,
+                         char16_t *dest, int32_t destCapacity,
+                         const char16_t *src, int32_t srcLength,
                          icu::Edits *edits,
                          UErrorCode &errorCode);
 
@@ -168,8 +170,8 @@ ustrcase_internalToTitle(int32_t caseLocale, uint32_t options,
 /** Implements UStringCaseMapper. */
 U_CFUNC int32_t U_CALLCONV
 ustrcase_internalFold(int32_t caseLocale, uint32_t options, UCASEMAP_BREAK_ITERATOR_PARAM
-                      UChar *dest, int32_t destCapacity,
-                      const UChar *src, int32_t srcLength,
+                      char16_t *dest, int32_t destCapacity,
+                      const char16_t *src, int32_t srcLength,
                       icu::Edits *edits,
                       UErrorCode &errorCode);
 
@@ -179,8 +181,8 @@ ustrcase_internalFold(int32_t caseLocale, uint32_t options, UCASEMAP_BREAK_ITERA
  */
 U_CFUNC int32_t
 ustrcase_map(int32_t caseLocale, uint32_t options, UCASEMAP_BREAK_ITERATOR_PARAM
-             UChar *dest, int32_t destCapacity,
-             const UChar *src, int32_t srcLength,
+             char16_t *dest, int32_t destCapacity,
+             const char16_t *src, int32_t srcLength,
              UStringCaseMapper *stringCaseMapper,
              icu::Edits *edits,
              UErrorCode &errorCode);
@@ -192,8 +194,8 @@ ustrcase_map(int32_t caseLocale, uint32_t options, UCASEMAP_BREAK_ITERATOR_PARAM
  */
 U_CFUNC int32_t
 ustrcase_mapWithOverlap(int32_t caseLocale, uint32_t options, UCASEMAP_BREAK_ITERATOR_PARAM
-                        UChar *dest, int32_t destCapacity,
-                        const UChar *src, int32_t srcLength,
+                        char16_t *dest, int32_t destCapacity,
+                        const char16_t *src, int32_t srcLength,
                         UStringCaseMapper *stringCaseMapper,
                         UErrorCode &errorCode);
 
@@ -201,7 +203,6 @@ ustrcase_mapWithOverlap(int32_t caseLocale, uint32_t options, UCASEMAP_BREAK_ITE
  * UTF-8 string case mapping function type, used by ucasemap_mapUTF8().
  * UTF-8 version of UStringCaseMapper.
  * All error checking must be done.
- * The UCaseMap must be fully initialized, with locale and/or iter set as needed.
  */
 typedef void U_CALLCONV
 UTF8CaseMapper(int32_t caseLocale, uint32_t options,
@@ -263,7 +264,8 @@ static const uint32_t HAS_EITHER_DIALYTIKA = HAS_DIALYTIKA | HAS_COMBINING_DIALY
 
 // State bits.
 static const uint32_t AFTER_CASED = 1;
-static const uint32_t AFTER_VOWEL_WITH_ACCENT = 2;
+static const uint32_t AFTER_VOWEL_WITH_COMBINING_ACCENT = 2;
+static const uint32_t AFTER_VOWEL_WITH_PRECOMPOSED_ACCENT = 4;
 
 uint32_t getLetterData(UChar32 c);
 

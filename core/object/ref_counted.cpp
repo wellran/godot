@@ -1,36 +1,37 @@
-/*************************************************************************/
-/*  ref_counted.cpp                                                      */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  ref_counted.cpp                                                       */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
 #include "ref_counted.h"
 
-#include "core/object/script_language.h"
+#include "core/object/class_db.h"
+#include "core/object/script_instance.h"
 
 bool RefCounted::init_ref() {
 	if (reference()) {
@@ -44,13 +45,29 @@ bool RefCounted::init_ref() {
 	}
 }
 
+void RefCounted::deinit_ref() {
+	// Somewhat unsafe since we're doing tests in sync, but it's probably fine
+	// since this function is called from the creation thread, so nobody else should have access.
+
+	// If this succeeds, refcount_init is 2 (or more).
+	// This would be unexpected, since callers should already have consumed it, or never established it.
+	// It's a little unsafe to bring it above 1, since it means init_ref must be called more than once,
+	// but the alternative would be decrementing refcount instead, which is also unsafe since the object
+	// might unexpectedly destruct early. Better to risk zombying than to risk a crash.
+	if (!refcount_init.ref()) {
+		// refcount_init already dead, must re-establish (expected).
+		refcount_init.init(1);
+	}
+}
+
 void RefCounted::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("init_ref"), &RefCounted::init_ref);
 	ClassDB::bind_method(D_METHOD("reference"), &RefCounted::reference);
 	ClassDB::bind_method(D_METHOD("unreference"), &RefCounted::unreference);
+	ClassDB::bind_method(D_METHOD("get_reference_count"), &RefCounted::get_reference_count);
 }
 
-int RefCounted::reference_get_count() const {
+int RefCounted::get_reference_count() const {
 	return refcount.get();
 }
 
@@ -73,6 +90,7 @@ bool RefCounted::reference() {
 }
 
 bool RefCounted::unreference() {
+	dereference_count.increment();
 	uint32_t rc_val = refcount.unrefval();
 	bool die = rc_val == 0;
 
@@ -85,7 +103,24 @@ bool RefCounted::unreference() {
 			_get_extension()->unreference(_get_extension_instance());
 		}
 
-		die = die && _instance_binding_reference(false);
+		bool binding_ret = _instance_binding_reference(false);
+		die = die && binding_ret;
+	}
+
+	dereference_count.decrement();
+
+	// If we are going to be destroyed we need to ensure that no other thread
+	// is still inside our critical section. If they are they might see
+	// a (partially) destroyed Object for get_script_instance, _get_extension,
+	// or _instance_binding_reference.
+	if (die) {
+		// It is unlikely that we will spin here for very long.
+		// Only threads that see die == true will spin, which should only
+		// ever be one. Only threads seeing rc_val == 1 and rc_val == 0
+		// will do anything at all in the critical section.
+		while (dereference_count.get()) {
+			// Spin
+		}
 	}
 
 	return die;
@@ -93,35 +128,8 @@ bool RefCounted::unreference() {
 
 RefCounted::RefCounted() :
 		Object(true) {
+	_define_ancestry(AncestralClass::REF_COUNTED);
 	refcount.init();
 	refcount_init.init();
-}
-
-Variant WeakRef::get_ref() const {
-	if (ref.is_null()) {
-		return Variant();
-	}
-
-	Object *obj = ObjectDB::get_instance(ref);
-	if (!obj) {
-		return Variant();
-	}
-	RefCounted *r = cast_to<RefCounted>(obj);
-	if (r) {
-		return REF(r);
-	}
-
-	return obj;
-}
-
-void WeakRef::set_obj(Object *p_object) {
-	ref = p_object ? p_object->get_instance_id() : ObjectID();
-}
-
-void WeakRef::set_ref(const REF &p_ref) {
-	ref = p_ref.is_valid() ? p_ref->get_instance_id() : ObjectID();
-}
-
-void WeakRef::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("get_ref"), &WeakRef::get_ref);
+	dereference_count.set(0);
 }

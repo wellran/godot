@@ -1,34 +1,44 @@
-/*************************************************************************/
-/*  light_2d.cpp                                                         */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  light_2d.cpp                                                          */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
 #include "light_2d.h"
+
+#include "core/config/engine.h"
+#include "core/object/class_db.h"
+#include "scene/main/scene_tree.h"
+#include "servers/rendering/rendering_server.h"
+
+void Light2D::owner_changed_notify() {
+	// For cases where owner changes _after_ entering tree (as example, editor editing).
+	_update_light_visibility();
+}
 
 void Light2D::_update_light_visibility() {
 	if (!is_inside_tree()) {
@@ -49,7 +59,7 @@ void Light2D::_update_light_visibility() {
 	if (editor_only) {
 		editor_ok = false;
 	}
-#endif
+#endif // TOOLS_ENABLED
 
 	RS::get_singleton()->canvas_light_set_enabled(canvas_light, enabled && is_visible_in_tree() && editor_ok);
 }
@@ -156,7 +166,6 @@ int Light2D::get_item_shadow_cull_mask() const {
 void Light2D::set_shadow_enabled(bool p_enabled) {
 	shadow = p_enabled;
 	RS::get_singleton()->canvas_light_set_shadow_enabled(canvas_light, shadow);
-	notify_property_list_changed();
 }
 
 bool Light2D::is_shadow_enabled() const {
@@ -166,7 +175,8 @@ bool Light2D::is_shadow_enabled() const {
 void Light2D::set_shadow_filter(ShadowFilter p_filter) {
 	ERR_FAIL_INDEX(p_filter, SHADOW_FILTER_MAX);
 	shadow_filter = p_filter;
-	RS::get_singleton()->canvas_light_set_shadow_filter(canvas_light, RS::CanvasLightShadowFilter(p_filter));
+	RS::get_singleton()->canvas_light_set_shadow_filter(canvas_light, RSE::CanvasLightShadowFilter(p_filter));
+	notify_property_list_changed();
 }
 
 Light2D::ShadowFilter Light2D::get_shadow_filter() const {
@@ -184,29 +194,47 @@ Color Light2D::get_shadow_color() const {
 
 void Light2D::set_blend_mode(BlendMode p_mode) {
 	blend_mode = p_mode;
-	RS::get_singleton()->canvas_light_set_blend_mode(_get_light(), RS::CanvasLightBlendMode(p_mode));
+	RS::get_singleton()->canvas_light_set_blend_mode(_get_light(), RSE::CanvasLightBlendMode(p_mode));
 }
 
 Light2D::BlendMode Light2D::get_blend_mode() const {
 	return blend_mode;
 }
 
+void Light2D::_physics_interpolated_changed() {
+	RenderingServer::get_singleton()->canvas_light_set_interpolated(canvas_light, is_physics_interpolated());
+}
+
 void Light2D::_notification(int p_what) {
-	if (p_what == NOTIFICATION_ENTER_TREE) {
-		RS::get_singleton()->canvas_light_attach_to_canvas(canvas_light, get_canvas());
-		_update_light_visibility();
-	}
+	switch (p_what) {
+		case NOTIFICATION_ENTER_CANVAS: {
+			RS::get_singleton()->canvas_light_attach_to_canvas(canvas_light, get_canvas());
+			_update_light_visibility();
+		} break;
 
-	if (p_what == NOTIFICATION_TRANSFORM_CHANGED) {
-		RS::get_singleton()->canvas_light_set_transform(canvas_light, get_global_transform());
-	}
-	if (p_what == NOTIFICATION_VISIBILITY_CHANGED) {
-		_update_light_visibility();
-	}
+		case NOTIFICATION_TRANSFORM_CHANGED: {
+			RS::get_singleton()->canvas_light_set_transform(canvas_light, get_global_transform());
+		} break;
 
-	if (p_what == NOTIFICATION_EXIT_TREE) {
-		RS::get_singleton()->canvas_light_attach_to_canvas(canvas_light, RID());
-		_update_light_visibility();
+		case NOTIFICATION_VISIBILITY_CHANGED: {
+			_update_light_visibility();
+		} break;
+
+		case NOTIFICATION_RESET_PHYSICS_INTERPOLATION: {
+			if (is_visible_in_tree() && is_physics_interpolated_and_enabled()) {
+				// Explicitly make sure the transform is up to date in RenderingServer before
+				// resetting. This is necessary because NOTIFICATION_TRANSFORM_CHANGED
+				// is normally deferred, and a client change to transform will not always be sent
+				// before the reset, so we need to guarantee this.
+				RS::get_singleton()->canvas_light_set_transform(canvas_light, get_global_transform());
+				RS::get_singleton()->canvas_light_reset_physics_interpolation(canvas_light);
+			}
+		} break;
+
+		case NOTIFICATION_EXIT_CANVAS: {
+			RS::get_singleton()->canvas_light_attach_to_canvas(canvas_light, RID());
+			_update_light_visibility();
+		} break;
 	}
 }
 
@@ -219,9 +247,12 @@ real_t Light2D::get_shadow_smooth() const {
 	return shadow_smooth;
 }
 
-void Light2D::_validate_property(PropertyInfo &property) const {
-	if (!shadow && (property.name == "shadow_color" || property.name == "shadow_filter" || property.name == "shadow_filter_smooth" || property.name == "shadow_item_cull_mask")) {
-		property.usage = PROPERTY_USAGE_NO_EDITOR;
+void Light2D::_validate_property(PropertyInfo &p_property) const {
+	if (!Engine::get_singleton()->is_editor_hint()) {
+		return;
+	}
+	if (shadow && p_property.name == "shadow_filter_smooth" && shadow_filter == SHADOW_FILTER_NONE) {
+		p_property.usage = PROPERTY_USAGE_NO_EDITOR;
 	}
 }
 
@@ -280,14 +311,14 @@ void Light2D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "energy", PROPERTY_HINT_RANGE, "0,16,0.01,or_greater"), "set_energy", "get_energy");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "blend_mode", PROPERTY_HINT_ENUM, "Add,Subtract,Mix"), "set_blend_mode", "get_blend_mode");
 	ADD_GROUP("Range", "range_");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "range_z_min", PROPERTY_HINT_RANGE, itos(RS::CANVAS_ITEM_Z_MIN) + "," + itos(RS::CANVAS_ITEM_Z_MAX) + ",1"), "set_z_range_min", "get_z_range_min");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "range_z_max", PROPERTY_HINT_RANGE, itos(RS::CANVAS_ITEM_Z_MIN) + "," + itos(RS::CANVAS_ITEM_Z_MAX) + ",1"), "set_z_range_max", "get_z_range_max");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "range_layer_min", PROPERTY_HINT_RANGE, "-512,512,1"), "set_layer_range_min", "get_layer_range_min");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "range_layer_max", PROPERTY_HINT_RANGE, "-512,512,1"), "set_layer_range_max", "get_layer_range_max");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "range_z_min", PROPERTY_HINT_RANGE, itos(RSE::CANVAS_ITEM_Z_MIN) + "," + itos(RSE::CANVAS_ITEM_Z_MAX) + ",1"), "set_z_range_min", "get_z_range_min");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "range_z_max", PROPERTY_HINT_RANGE, itos(RSE::CANVAS_ITEM_Z_MIN) + "," + itos(RSE::CANVAS_ITEM_Z_MAX) + ",1"), "set_z_range_max", "get_z_range_max");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "range_layer_min", PROPERTY_HINT_RANGE, itos(RSE::CANVAS_LAYER_MIN) + "," + itos(RSE::CANVAS_LAYER_MAX) + ",1"), "set_layer_range_min", "get_layer_range_min");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "range_layer_max", PROPERTY_HINT_RANGE, itos(RSE::CANVAS_LAYER_MIN) + "," + itos(RSE::CANVAS_LAYER_MAX) + ",1"), "set_layer_range_max", "get_layer_range_max");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "range_item_cull_mask", PROPERTY_HINT_LAYERS_2D_RENDER), "set_item_cull_mask", "get_item_cull_mask");
 
 	ADD_GROUP("Shadow", "shadow_");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "shadow_enabled"), "set_shadow_enabled", "is_shadow_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "shadow_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_shadow_enabled", "is_shadow_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::COLOR, "shadow_color"), "set_shadow_color", "get_shadow_color");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "shadow_filter", PROPERTY_HINT_ENUM, "None (Fast),PCF5 (Average),PCF13 (Slow)"), "set_shadow_filter", "get_shadow_filter");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shadow_filter_smooth", PROPERTY_HINT_RANGE, "0,64,0.1"), "set_shadow_smooth", "get_shadow_smooth");
@@ -308,13 +339,13 @@ Light2D::Light2D() {
 }
 
 Light2D::~Light2D() {
-	RenderingServer::get_singleton()->free(canvas_light);
+	ERR_FAIL_NULL(RenderingServer::get_singleton());
+	RenderingServer::get_singleton()->free_rid(canvas_light);
 }
 
 //////////////////////////////
 
-#ifdef TOOLS_ENABLED
-
+#ifdef DEBUG_ENABLED
 Dictionary PointLight2D::_edit_get_state() const {
 	Dictionary state = Node2D::_edit_get_state();
 	state["offset"] = get_texture_offset();
@@ -349,9 +380,9 @@ Rect2 PointLight2D::_edit_get_rect() const {
 }
 
 bool PointLight2D::_edit_use_rect() const {
-	return !texture.is_null();
+	return texture.is_valid();
 }
-#endif
+#endif // DEBUG_ENABLED
 
 Rect2 PointLight2D::get_anchorable_rect() const {
 	if (texture.is_null()) {
@@ -365,6 +396,19 @@ Rect2 PointLight2D::get_anchorable_rect() const {
 void PointLight2D::set_texture(const Ref<Texture2D> &p_texture) {
 	texture = p_texture;
 	if (texture.is_valid()) {
+#ifdef DEBUG_ENABLED
+		if (
+				p_texture->is_class("AnimatedTexture") ||
+				p_texture->is_class("AtlasTexture") ||
+				p_texture->is_class("CameraTexture") ||
+				p_texture->is_class("CanvasTexture") ||
+				p_texture->is_class("MeshTexture") ||
+				p_texture->is_class("Texture2DRD") ||
+				p_texture->is_class("ViewportTexture")) {
+			WARN_PRINT(vformat("%s cannot be used as a PointLight2D texture (%s). As a workaround, assign the value returned by %s's `get_image()` instead.", p_texture->get_class(), get_path(), p_texture->get_class()));
+		}
+#endif
+
 		RS::get_singleton()->canvas_light_set_texture(_get_light(), texture->get_rid());
 	} else {
 		RS::get_singleton()->canvas_light_set_texture(_get_light(), RID());
@@ -387,11 +431,11 @@ Vector2 PointLight2D::get_texture_offset() const {
 	return texture_offset;
 }
 
-TypedArray<String> PointLight2D::get_configuration_warnings() const {
-	TypedArray<String> warnings = Node::get_configuration_warnings();
+PackedStringArray PointLight2D::get_configuration_warnings() const {
+	PackedStringArray warnings = Light2D::get_configuration_warnings();
 
-	if (!texture.is_valid()) {
-		warnings.push_back(TTR("A texture with the shape of the light must be supplied to the \"Texture\" property."));
+	if (texture.is_null()) {
+		warnings.push_back(RTR("A texture with the shape of the light must be supplied to the \"Texture\" property."));
 	}
 
 	return warnings;
@@ -411,6 +455,17 @@ real_t PointLight2D::get_texture_scale() const {
 	return _scale;
 }
 
+#ifndef DISABLE_DEPRECATED
+bool PointLight2D::_set(const StringName &p_name, const Variant &p_value) {
+	if (p_name == "mode" && p_value.is_num()) { // Compatibility with Godot 3.x.
+		set_blend_mode((BlendMode)(int)p_value);
+		return true;
+	}
+
+	return false;
+}
+#endif // DISABLE_DEPRECATED
+
 void PointLight2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_texture", "texture"), &PointLight2D::set_texture);
 	ClassDB::bind_method(D_METHOD("get_texture"), &PointLight2D::get_texture);
@@ -421,14 +476,16 @@ void PointLight2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_texture_scale", "texture_scale"), &PointLight2D::set_texture_scale);
 	ClassDB::bind_method(D_METHOD("get_texture_scale"), &PointLight2D::get_texture_scale);
 
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "texture", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "set_texture", "get_texture");
-	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "offset"), "set_texture_offset", "get_texture_offset");
+	// Only allow texture types that display correctly.
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "texture", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D,-AnimatedTexture,-AtlasTexture,-CameraTexture,-CanvasTexture,-MeshTexture,-Texture2DRD,-ViewportTexture"), "set_texture", "get_texture");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "offset", PROPERTY_HINT_NONE, "suffix:px"), "set_texture_offset", "get_texture_offset");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "texture_scale", PROPERTY_HINT_RANGE, "0.01,50,0.01"), "set_texture_scale", "get_texture_scale");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "height", PROPERTY_HINT_RANGE, "0,1024,1,or_greater"), "set_height", "get_height");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "height", PROPERTY_HINT_RANGE, "0,1024,1,or_greater,suffix:px"), "set_height", "get_height");
 }
 
 PointLight2D::PointLight2D() {
-	RS::get_singleton()->canvas_light_set_mode(_get_light(), RS::CANVAS_LIGHT_MODE_POINT);
+	RS::get_singleton()->canvas_light_set_mode(_get_light(), RSE::CANVAS_LIGHT_MODE_POINT);
+	set_hide_clip_children(true);
 }
 
 //////////
@@ -447,10 +504,11 @@ void DirectionalLight2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_max_distance"), &DirectionalLight2D::get_max_distance);
 
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "height", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_height", "get_height");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "max_distance", PROPERTY_HINT_RANGE, "0,16384.0,1.0,or_greater"), "set_max_distance", "get_max_distance");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "max_distance", PROPERTY_HINT_RANGE, "0,16384.0,1.0,or_greater,suffix:px"), "set_max_distance", "get_max_distance");
 }
 
 DirectionalLight2D::DirectionalLight2D() {
-	RS::get_singleton()->canvas_light_set_mode(_get_light(), RS::CANVAS_LIGHT_MODE_DIRECTIONAL);
+	RS::get_singleton()->canvas_light_set_mode(_get_light(), RSE::CANVAS_LIGHT_MODE_DIRECTIONAL);
 	set_max_distance(max_distance); // Update RenderingServer.
+	set_hide_clip_children(true);
 }

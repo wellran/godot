@@ -1,11 +1,6 @@
-
 int _handle_get_tree_id(BVHHandle p_handle) const {
 	if (USE_PAIRS) {
-		int tree = 0;
-		if (_extra[p_handle.id()].pairable) {
-			tree = 1;
-		}
-		return tree;
+		return _extra[p_handle.id()].tree_id;
 	}
 	return 0;
 }
@@ -36,20 +31,20 @@ void create_root_node(int p_tree) {
 	}
 }
 
-bool node_is_leaf_full(TNode &tnode) const {
-	const TLeaf &leaf = _node_get_leaf(tnode);
+bool node_is_leaf_full(TNode &r_tnode) const {
+	const TLeaf &leaf = _node_get_leaf(r_tnode);
 	return leaf.is_full();
 }
 
 public:
-TLeaf &_node_get_leaf(TNode &tnode) {
-	BVH_ASSERT(tnode.is_leaf());
-	return _leaves[tnode.get_leaf_id()];
+TLeaf &_node_get_leaf(TNode &r_tnode) {
+	BVH_ASSERT(r_tnode.is_leaf());
+	return _leaves[r_tnode.get_leaf_id()];
 }
 
-const TLeaf &_node_get_leaf(const TNode &tnode) const {
-	BVH_ASSERT(tnode.is_leaf());
-	return _leaves[tnode.get_leaf_id()];
+const TLeaf &_node_get_leaf(const TNode &p_tnode) const {
+	BVH_ASSERT(p_tnode.is_leaf());
+	return _leaves[p_tnode.get_leaf_id()];
 }
 
 private:

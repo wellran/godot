@@ -1,4 +1,3 @@
-
 // for slow incremental optimization, we will periodically remove each
 // item from the tree and reinsert, to give it a chance to find a better position
 void _logic_item_remove_and_reinsert(uint32_t p_ref_id) {
@@ -34,17 +33,17 @@ void _logic_item_remove_and_reinsert(uint32_t p_ref_id) {
 }
 
 // from randy gaul balance function
-BVHABB_CLASS _logic_abb_merge(const BVHABB_CLASS &a, const BVHABB_CLASS &b) {
-	BVHABB_CLASS c = a;
-	c.merge(b);
-	return c;
+BVHABB_CLASS _logic_abb_merge(const BVHABB_CLASS &p_left, const BVHABB_CLASS &p_right) {
+	BVHABB_CLASS tmp = p_left;
+	tmp.merge(p_right);
+	return tmp;
 }
 
 //--------------------------------------------------------------------------------------------------
 /**
- * @file	q3DynamicAABBTree.h
- * @author	Randy Gaul
- * @date	10/10/2014
+ * @file    q3DynamicAABBTree.h
+ * @author  Randy Gaul
+ * @date    10/10/2014
  *  Copyright (c) 2014 Randy Gaul http://www.randygaul.net
  *  This software is provided 'as-is', without any express or implied
  *  warranty. In no event will the authors be held liable for any damages
@@ -66,7 +65,7 @@ BVHABB_CLASS _logic_abb_merge(const BVHABB_CLASS &a, const BVHABB_CLASS &b) {
 // https://github.com/RandyGaul/qu3e
 // It is MODIFIED from qu3e version.
 // This is the only function used (and _logic_abb_merge helper function).
-int32_t _logic_balance(int32_t iA, uint32_t p_tree_id) {
+int32_t _logic_balance(int32_t iA, uint32_t p_tree_id) { // NOLINT(readability-identifier-naming)
 	//return iA; // uncomment this to bypass balance
 
 	TNode *A = &_nodes[iA];
@@ -75,11 +74,11 @@ int32_t _logic_balance(int32_t iA, uint32_t p_tree_id) {
 		return iA;
 	}
 
-	/*       A
-	 *     /   \
-	 *    B     C
-	 *   / \   / \
-	 *  D   E F   G
+	/*        A
+	 *      /   \
+	 *     B     C
+	 *    / \   / \
+	 *   D   E F   G
 	 */
 
 	CRASH_COND(A->num_children != 2);

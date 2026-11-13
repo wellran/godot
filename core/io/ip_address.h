@@ -1,39 +1,38 @@
-/*************************************************************************/
-/*  ip_address.h                                                         */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  ip_address.h                                                          */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
-#ifndef IP_ADDRESS_H
-#define IP_ADDRESS_H
+#pragma once
 
 #include "core/string/ustring.h"
 
-struct IPAddress {
+struct [[nodiscard]] _WARN_UNUSED_ IPAddress {
 private:
 	union {
 		uint8_t field8[16];
@@ -41,12 +40,17 @@ private:
 		uint32_t field32[4];
 	};
 
+	enum {
+		IPV4_MAX_STRING_LENGTH = 16,
+		IPV6_MAX_STRING_LENGTH = 40,
+	};
+
 	bool valid;
 	bool wildcard;
 
 protected:
-	void _parse_ipv6(const String &p_string);
-	void _parse_ipv4(const String &p_string, int p_start, uint8_t *p_ret);
+	static bool _parse_ipv6(const String &p_string, IPAddress &r_ip);
+	static bool _parse_ipv4(const String &p_string, int p_start, uint8_t *r_dest);
 
 public:
 	//operator Variant() const;
@@ -80,6 +84,8 @@ public:
 		return false;
 	}
 
+	static bool is_valid_ip_address(const String &p_string);
+
 	void clear();
 	bool is_wildcard() const { return wildcard; }
 	bool is_valid() const { return valid; }
@@ -90,10 +96,12 @@ public:
 	const uint8_t *get_ipv6() const;
 	void set_ipv6(const uint8_t *p_buf);
 
-	operator String() const;
+	explicit operator String() const;
 	IPAddress(const String &p_string);
-	IPAddress(uint32_t p_a, uint32_t p_b, uint32_t p_c, uint32_t p_d, bool is_v6 = false);
+	IPAddress(uint32_t p_a, uint32_t p_b, uint32_t p_c, uint32_t p_d, bool p_is_v6 = false);
 	IPAddress() { clear(); }
 };
 
-#endif // IP_ADDRESS_H
+// Zero-constructing IPAddress initializes field, valid, and wildcard to 0 (and thus empty).
+template <>
+struct is_zero_constructible<IPAddress> : std::true_type {};

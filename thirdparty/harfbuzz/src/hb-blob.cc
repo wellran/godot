@@ -99,7 +99,7 @@ hb_blob_create (const char        *data,
  * is zero. This is in contrast to hb_blob_create(), which returns the singleton
  * empty blob (as returned by hb_blob_get_empty()) if @length is zero.
  *
- * Return value: New blob, or %NULL if failed.  Destroy with hb_blob_destroy().
+ * Return value: New blob, or `NULL` if failed.  Destroy with hb_blob_destroy().
  *
  * Since: 2.8.2
  **/
@@ -263,8 +263,6 @@ hb_blob_destroy (hb_blob_t *blob)
 {
   if (!hb_object_destroy (blob)) return;
 
-  blob->fini_shallow ();
-
   hb_free (blob);
 }
 
@@ -278,7 +276,7 @@ hb_blob_destroy (hb_blob_t *blob)
  *
  * Attaches a user-data key/data pair to the specified blob.
  *
- * Return value: %true if success, %false otherwise
+ * Return value: `true` if success, `false` otherwise
  *
  * Since: 0.9.2
  **/
@@ -305,7 +303,7 @@ hb_blob_set_user_data (hb_blob_t          *blob,
  * Since: 0.9.2
  **/
 void *
-hb_blob_get_user_data (hb_blob_t          *blob,
+hb_blob_get_user_data (const hb_blob_t    *blob,
 		       hb_user_data_key_t *key)
 {
   return hb_object_get_user_data (blob, key);
@@ -335,7 +333,7 @@ hb_blob_make_immutable (hb_blob_t *blob)
  *
  * Tests whether a blob is immutable.
  *
- * Return value: %true if @blob is immutable, %false otherwise
+ * Return value: `true` if @blob is immutable, `false` otherwise
  *
  * Since: 0.9.2
  **/
@@ -369,7 +367,7 @@ hb_blob_get_length (hb_blob_t *blob)
  *
  * Fetches the data from a blob.
  *
- * Returns: (transfer none) (array length=length): the byte data of @blob.
+ * Returns: (nullable) (transfer none) (array length=length): the byte data of @blob.
  *
  * Since: 0.9.2
  **/
@@ -394,7 +392,7 @@ hb_blob_get_data (hb_blob_t *blob, unsigned int *length)
  * fails.
  *
  * Returns: (transfer none) (array length=length): Writable blob data,
- * or %NULL if failed.
+ * or `NULL` if failed.
  *
  * Since: 0.9.2
  **/
@@ -497,7 +495,7 @@ hb_blob_t::try_make_writable ()
 
   DEBUG_MSG_FUNC (BLOB, this, "dupped successfully -> %p\n", this->data);
 
-  memcpy (new_data, this->data, this->length);
+  hb_memcpy (new_data, this->data, this->length);
   this->destroy_user_data ();
   this->mode = HB_MEMORY_MODE_WRITABLE;
   this->data = new_data;
@@ -572,7 +570,7 @@ _open_resource_fork (const char *file_name, hb_mapped_file_t *file)
 
   strncpy (rsrc_name, file_name, name_len);
   strncpy (rsrc_name + name_len, _PATH_RSRCFORKSPEC,
-	   sizeof (_PATH_RSRCFORKSPEC) - 1);
+	   sizeof (_PATH_RSRCFORKSPEC));
 
   int fd = open (rsrc_name, O_RDONLY | O_BINARY, 0);
   hb_free (rsrc_name);
@@ -600,6 +598,11 @@ _open_resource_fork (const char *file_name, hb_mapped_file_t *file)
  * Creates a new blob containing the data from the
  * specified binary font file.
  *
+ * The filename is passed directly to the system on all platforms,
+ * except on Windows, where the filename is interpreted as UTF-8.
+ * Only if the filename is not valid UTF-8, it will be interpreted
+ * according to the system codepage.
+ *
  * Returns: An #hb_blob_t pointer with the content of the file,
  * or hb_blob_get_empty() if failed.
  *
@@ -612,32 +615,20 @@ hb_blob_create_from_file (const char *file_name)
   return likely (blob) ? blob : hb_blob_get_empty ();
 }
 
-/**
- * hb_blob_create_from_file_or_fail:
- * @file_name: A font filename
- *
- * Creates a new blob containing the data from the
- * specified binary font file.
- *
- * Returns: An #hb_blob_t pointer with the content of the file,
- * or %NULL if failed.
- *
- * Since: 2.8.2
- **/
-hb_blob_t *
-hb_blob_create_from_file_or_fail (const char *file_name)
-{
-  /* Adopted from glib's gmappedfile.c with Matthias Clasen and
-     Allison Lortie permission but changed a lot to suit our need. */
 #if defined(HAVE_MMAP) && !defined(HB_NO_MMAP)
+static hb_blob_t *
+_hb_blob_try_mmap (const char *file_name)
+{
   hb_mapped_file_t *file = (hb_mapped_file_t *) hb_calloc (1, sizeof (hb_mapped_file_t));
-  if (unlikely (!file)) return hb_blob_get_empty ();
+  if (unlikely (!file)) return nullptr;
+  auto file_guard = hb_make_scope_guard ([&]() { hb_free (file); });
 
   int fd = open (file_name, O_RDONLY | O_BINARY, 0);
-  if (unlikely (fd == -1)) goto fail_without_close;
+  if (unlikely (fd == -1)) return nullptr;
+  auto fd_guard = hb_make_scope_guard ([&]() { close (fd); });
 
   struct stat st;
-  if (unlikely (fstat (fd, &st) == -1)) goto fail;
+  if (unlikely (fstat (fd, &st) == -1)) return nullptr;
 
   file->length = (unsigned long) st.st_size;
 
@@ -655,30 +646,37 @@ hb_blob_create_from_file_or_fail (const char *file_name)
 
   file->contents = (char *) mmap (nullptr, file->length, PROT_READ,
 				  MAP_PRIVATE | MAP_NORESERVE, fd, 0);
+  if (unlikely (file->contents == MAP_FAILED)) return nullptr;
 
-  if (unlikely (file->contents == MAP_FAILED)) goto fail;
-
-  close (fd);
-
+  file_guard.release ();
+  /* fd_guard closes fd on return (ownership ends after mmap). */
   return hb_blob_create_or_fail (file->contents, file->length,
 				 HB_MEMORY_MODE_READONLY_MAY_MAKE_WRITABLE, (void *) file,
 				 (hb_destroy_func_t) _hb_mapped_file_destroy);
-
-fail:
-  close (fd);
-fail_without_close:
-  hb_free (file);
-
+}
 #elif defined(_WIN32) && !defined(HB_NO_MMAP)
+static hb_blob_t *
+_hb_blob_try_mmap (const char *file_name)
+{
   hb_mapped_file_t *file = (hb_mapped_file_t *) hb_calloc (1, sizeof (hb_mapped_file_t));
-  if (unlikely (!file)) return hb_blob_get_empty ();
+  if (unlikely (!file)) return nullptr;
+  auto file_guard = hb_make_scope_guard ([&]() { hb_free (file); });
+
+  size_t size = strlen (file_name) + 1;
+  wchar_t *wchar_file_name = (wchar_t *) hb_malloc (sizeof (wchar_t) * size);
+  if (unlikely (!wchar_file_name)) return nullptr;
+
+  /* Assume file name is given in UTF-8 encoding */
+  int conversion = MultiByteToWideChar (CP_UTF8, MB_ERR_INVALID_CHARS, file_name, -1, wchar_file_name, size);
+  if (conversion <= 0)
+  {
+    /* Conversion failed due to invalid UTF-8 characters,
+       Repeat conversion based on system code page */
+    mbstowcs (wchar_file_name, file_name, size);
+  }
 
   HANDLE fd;
-  unsigned int size = strlen (file_name) + 1;
-  wchar_t * wchar_file_name = (wchar_t *) hb_malloc (sizeof (wchar_t) * size);
-  if (unlikely (!wchar_file_name)) goto fail_without_close;
-  mbstowcs (wchar_file_name, file_name, size);
-#if !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
+#if !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP) && WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_APP)
   {
     CREATEFILE2_EXTENDED_PARAMETERS ceparams = { 0 };
     ceparams.dwSize = sizeof(CREATEFILE2_EXTENDED_PARAMETERS);
@@ -697,9 +695,10 @@ fail_without_close:
 #endif
   hb_free (wchar_file_name);
 
-  if (unlikely (fd == INVALID_HANDLE_VALUE)) goto fail_without_close;
+  if (unlikely (fd == INVALID_HANDLE_VALUE)) return nullptr;
+  auto fd_guard = hb_make_scope_guard ([&]() { CloseHandle (fd); });
 
-#if !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
+#if !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP) && WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_APP)
   {
     LARGE_INTEGER length;
     GetFileSizeEx (fd, &length);
@@ -710,35 +709,36 @@ fail_without_close:
   file->length = (unsigned long) GetFileSize (fd, nullptr);
   file->mapping = CreateFileMapping (fd, nullptr, PAGE_READONLY, 0, 0, nullptr);
 #endif
-  if (unlikely (!file->mapping)) goto fail;
+  if (unlikely (!file->mapping)) return nullptr;
 
-#if !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
+#if !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP) && WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_APP)
   file->contents = (char *) MapViewOfFileFromApp (file->mapping, FILE_MAP_READ, 0, 0);
 #else
   file->contents = (char *) MapViewOfFile (file->mapping, FILE_MAP_READ, 0, 0, 0);
 #endif
-  if (unlikely (!file->contents)) goto fail;
+  if (unlikely (!file->contents)) return nullptr;
 
-  CloseHandle (fd);
+  file_guard.release ();
+  /* fd_guard closes fd on return. */
   return hb_blob_create_or_fail (file->contents, file->length,
 				 HB_MEMORY_MODE_READONLY_MAY_MAKE_WRITABLE, (void *) file,
 				 (hb_destroy_func_t) _hb_mapped_file_destroy);
-
-fail:
-  CloseHandle (fd);
-fail_without_close:
-  hb_free (file);
-
+}
 #endif
 
-  /* The following tries to read a file without knowing its size beforehand
-     It's used as a fallback for systems without mmap or to read from pipes */
+/* Read a file without knowing its size beforehand.  Used as a fallback
+ * for systems without mmap or to read from pipes. */
+static hb_blob_t *
+_hb_blob_read_file (const char *file_name)
+{
   unsigned long len = 0, allocated = BUFSIZ * 16;
   char *data = (char *) hb_malloc (allocated);
   if (unlikely (!data)) return nullptr;
+  auto data_guard = hb_make_scope_guard ([&]() { hb_free (data); });
 
   FILE *fp = fopen (file_name, "rb");
-  if (unlikely (!fp)) goto fread_fail_without_close;
+  if (unlikely (!fp)) return nullptr;
+  HB_SCOPE_GUARD (fclose (fp));
 
   while (!feof (fp))
   {
@@ -747,9 +747,9 @@ fail_without_close:
       allocated *= 2;
       /* Don't allocate and go more than ~536MB, our mmap reader still
 	 can cover files like that but lets limit our fallback reader */
-      if (unlikely (allocated > (2 << 28))) goto fread_fail;
+      if (unlikely (allocated > (2 << 28))) return nullptr;
       char *new_data = (char *) hb_realloc (data, allocated);
-      if (unlikely (!new_data)) goto fread_fail;
+      if (unlikely (!new_data)) return nullptr;
       data = new_data;
     }
 
@@ -759,19 +759,41 @@ fail_without_close:
 #ifdef EINTR // armcc doesn't have it
     if (unlikely (err == EINTR)) continue;
 #endif
-    if (unlikely (err)) goto fread_fail;
+    if (unlikely (err)) return nullptr;
 
     len += addition;
   }
-	fclose (fp);
 
+  data_guard.release ();
   return hb_blob_create_or_fail (data, len, HB_MEMORY_MODE_WRITABLE, data,
 				 (hb_destroy_func_t) hb_free);
+}
 
-fread_fail:
-  fclose (fp);
-fread_fail_without_close:
-  hb_free (data);
-  return nullptr;
+/**
+ * hb_blob_create_from_file_or_fail:
+ * @file_name: A filename
+ *
+ * Creates a new blob containing the data from the specified file.
+ *
+ * The filename is passed directly to the system on all platforms,
+ * except on Windows, where the filename is interpreted as UTF-8.
+ * Only if the filename is not valid UTF-8, it will be interpreted
+ * according to the system codepage.
+ *
+ * Returns: An #hb_blob_t pointer with the content of the file,
+ * or `NULL` if failed.
+ *
+ * Since: 2.8.2
+ **/
+hb_blob_t *
+hb_blob_create_from_file_or_fail (const char *file_name)
+{
+  /* Adopted from glib's gmappedfile.c with Matthias Clasen and
+     Allison Lortie permission but changed a lot to suit our need. */
+#if (defined(HAVE_MMAP) || defined(_WIN32)) && !defined(HB_NO_MMAP)
+  if (hb_blob_t *blob = _hb_blob_try_mmap (file_name))
+    return blob;
+#endif
+  return _hb_blob_read_file (file_name);
 }
 #endif /* !HB_NO_OPEN */

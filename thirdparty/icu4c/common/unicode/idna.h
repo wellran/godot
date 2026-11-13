@@ -70,6 +70,7 @@ public:
      * The worker functions use transitional processing, including deviation mappings,
      * unless UIDNA_NONTRANSITIONAL_TO_ASCII or UIDNA_NONTRANSITIONAL_TO_UNICODE
      * is used in which case the deviation characters are passed through without change.
+     * <b>Unicode 15.1 UTS #46 deprecated transitional processing.</b>
      *
      * Disallowed characters are mapped to U+FFFD.
      *
@@ -82,6 +83,8 @@ public:
      * letters, digits, hyphen (LDH) and dot/full stop are disallowed and mapped to U+FFFD.
      *
      * @param options Bit set to modify the processing and error checking.
+     *                These should include UIDNA_DEFAULT, or
+     *                UIDNA_NONTRANSITIONAL_TO_ASCII | UIDNA_NONTRANSITIONAL_TO_UNICODE.
      *                See option bit set values in uidna.h.
      * @param errorCode Standard ICU error code. Its input value must
      *                  pass the U_SUCCESS() test, or else the function returns
@@ -113,9 +116,11 @@ public:
      * @return dest
      * @stable ICU 4.6
      */
-    virtual UnicodeString &
-    labelToASCII(const UnicodeString &label, UnicodeString &dest,
-                 IDNAInfo &info, UErrorCode &errorCode) const = 0;
+    virtual UnicodeString&
+    labelToASCII(const UnicodeString& label,
+                 UnicodeString& dest U_LIFETIME_BOUND,
+                 IDNAInfo& info,
+                 UErrorCode& errorCode) const = 0;
 
     /**
      * Converts a single domain name label into its Unicode form for human-readable display.
@@ -135,9 +140,11 @@ public:
      * @return dest
      * @stable ICU 4.6
      */
-    virtual UnicodeString &
-    labelToUnicode(const UnicodeString &label, UnicodeString &dest,
-                   IDNAInfo &info, UErrorCode &errorCode) const = 0;
+    virtual UnicodeString&
+    labelToUnicode(const UnicodeString& label,
+                   UnicodeString& dest U_LIFETIME_BOUND,
+                   IDNAInfo& info,
+                   UErrorCode& errorCode) const = 0;
 
     /**
      * Converts a whole domain name into its ASCII form for DNS lookup.
@@ -159,9 +166,11 @@ public:
      * @return dest
      * @stable ICU 4.6
      */
-    virtual UnicodeString &
-    nameToASCII(const UnicodeString &name, UnicodeString &dest,
-                IDNAInfo &info, UErrorCode &errorCode) const = 0;
+    virtual UnicodeString&
+    nameToASCII(const UnicodeString& name,
+                UnicodeString& dest U_LIFETIME_BOUND,
+                IDNAInfo& info,
+                UErrorCode& errorCode) const = 0;
 
     /**
      * Converts a whole domain name into its Unicode form for human-readable display.
@@ -181,9 +190,11 @@ public:
      * @return dest
      * @stable ICU 4.6
      */
-    virtual UnicodeString &
-    nameToUnicode(const UnicodeString &name, UnicodeString &dest,
-                  IDNAInfo &info, UErrorCode &errorCode) const = 0;
+    virtual UnicodeString&
+    nameToUnicode(const UnicodeString& name,
+                  UnicodeString& dest U_LIFETIME_BOUND,
+                  IDNAInfo& info,
+                  UErrorCode& errorCode) const = 0;
 
     // UTF-8 versions of the processing methods ---------------------------- ***
 
@@ -198,7 +209,6 @@ public:
      *                  pass the U_SUCCESS() test, or else the function returns
      *                  immediately. Check for U_FAILURE() on output or use with
      *                  function chaining. (See User Guide for details.)
-     * @return dest
      * @stable ICU 4.6
      */
     virtual void
@@ -216,7 +226,6 @@ public:
      *                  pass the U_SUCCESS() test, or else the function returns
      *                  immediately. Check for U_FAILURE() on output or use with
      *                  function chaining. (See User Guide for details.)
-     * @return dest
      * @stable ICU 4.6
      */
     virtual void
@@ -234,7 +243,6 @@ public:
      *                  pass the U_SUCCESS() test, or else the function returns
      *                  immediately. Check for U_FAILURE() on output or use with
      *                  function chaining. (See User Guide for details.)
-     * @return dest
      * @stable ICU 4.6
      */
     virtual void
@@ -252,7 +260,6 @@ public:
      *                  pass the U_SUCCESS() test, or else the function returns
      *                  immediately. Check for U_FAILURE() on output or use with
      *                  function chaining. (See User Guide for details.)
-     * @return dest
      * @stable ICU 4.6
      */
     virtual void
@@ -305,8 +312,8 @@ public:
 private:
     friend class UTS46;
 
-    IDNAInfo(const IDNAInfo &other);  // no copying
-    IDNAInfo &operator=(const IDNAInfo &other);  // no copying
+    IDNAInfo(const IDNAInfo &other) = delete;  // no copying
+    IDNAInfo &operator=(const IDNAInfo &other) = delete;  // no copying
 
     void reset() {
         errors=labelErrors=0;

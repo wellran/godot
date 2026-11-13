@@ -1,42 +1,46 @@
-/*************************************************************************/
-/*  animation_tree.cpp                                                   */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  animation_tree.cpp                                                    */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
 #include "animation_tree.h"
+#include "animation_tree.compat.inc"
 
-#include "animation_blend_tree.h"
 #include "core/config/engine.h"
-#include "scene/resources/animation.h"
-#include "scene/scene_string_names.h"
-#include "servers/audio/audio_stream.h"
+#include "core/object/callable_mp.h"
+#include "core/object/class_db.h"
+#include "scene/animation/animation_blend_tree.h"
+#include "scene/animation/animation_player.h"
 
-void AnimationNode::get_parameter_list(List<PropertyInfo> *r_list) const {
+thread_local AnimationNode::ProcessState *AnimationNode::tls_process_state = nullptr;
+thread_local AnimationNodeInstance *AnimationNode::current_instance = nullptr;
+
+void AnimationNode::get_parameter_list(LocalVector<PropertyInfo> *r_list) const {
 	Array parameters;
 
 	if (GDVIRTUAL_CALL(_get_parameter_list, parameters)) {
@@ -46,210 +50,191 @@ void AnimationNode::get_parameter_list(List<PropertyInfo> *r_list) const {
 			r_list->push_back(PropertyInfo::from_dict(d));
 		}
 	}
+
+	r_list->push_back(PropertyInfo(Variant::FLOAT, current_length, PROPERTY_HINT_NONE, "", PROPERTY_USAGE_READ_ONLY));
+	r_list->push_back(PropertyInfo(Variant::FLOAT, current_position, PROPERTY_HINT_NONE, "", PROPERTY_USAGE_READ_ONLY));
+	r_list->push_back(PropertyInfo(Variant::FLOAT, current_delta, PROPERTY_HINT_NONE, "", PROPERTY_USAGE_READ_ONLY));
 }
 
 Variant AnimationNode::get_parameter_default_value(const StringName &p_parameter) const {
 	Variant ret;
-	if (GDVIRTUAL_CALL(_get_parameter_default_value, p_parameter, ret)) {
-		return ret;
+	if (p_parameter == current_length || p_parameter == current_position || p_parameter == current_delta) {
+		return 0.0;
 	}
-	return Variant();
+	if (p_parameter == observer) {
+		return Ref<AnimationNodeObserver>();
+	}
+	GDVIRTUAL_CALL(_get_parameter_default_value, p_parameter, ret);
+	return ret;
 }
 
-void AnimationNode::set_parameter(const StringName &p_name, const Variant &p_value) {
-	ERR_FAIL_COND(!state);
-	ERR_FAIL_COND(!state->tree->property_parent_map.has(base_path));
-	ERR_FAIL_COND(!state->tree->property_parent_map[base_path].has(p_name));
-	StringName path = state->tree->property_parent_map[base_path][p_name];
+bool AnimationNode::is_parameter_read_only(const StringName &p_parameter) const {
+	bool ret = false;
+	if (GDVIRTUAL_CALL(_is_parameter_read_only, p_parameter, ret) && ret) {
+		return true;
+	}
 
-	state->tree->property_map[path] = p_value;
+	if (p_parameter == current_length || p_parameter == current_position || p_parameter == current_delta) {
+		return true;
+	}
+
+	return false;
 }
 
-Variant AnimationNode::get_parameter(const StringName &p_name) const {
-	ERR_FAIL_COND_V(!state, Variant());
-	ERR_FAIL_COND_V(!state->tree->property_parent_map.has(base_path), Variant());
-	ERR_FAIL_COND_V(!state->tree->property_parent_map[base_path].has(p_name), Variant());
-
-	StringName path = state->tree->property_parent_map[base_path][p_name];
-	return state->tree->property_map[path];
+void AnimationNode::set_parameter_ex(const StringName &p_name, const Variant &p_value) {
+	ERR_FAIL_NULL(tls_process_state);
+	ERR_FAIL_NULL(current_instance);
+	current_instance->set_parameter(p_name, p_value, tls_process_state->is_testing);
 }
 
-void AnimationNode::get_child_nodes(List<ChildNode> *r_child_nodes) {
+Variant AnimationNode::get_parameter_ex(const StringName &p_name) const {
+	ERR_FAIL_NULL_V(tls_process_state, Variant());
+	ERR_FAIL_NULL_V(current_instance, Variant());
+	return current_instance->get_parameter(p_name);
+}
+
+void AnimationNode::get_child_nodes(LocalVector<ChildNode> *r_child_nodes) {
 	Dictionary cn;
 	if (GDVIRTUAL_CALL(_get_child_nodes, cn)) {
-		List<Variant> keys;
-		cn.get_key_list(&keys);
-		for (const Variant &E : keys) {
+		for (const KeyValue<Variant, Variant> &kv : cn) {
 			ChildNode child;
-			child.name = E;
-			child.node = cn[E];
+			child.name = kv.key;
+			child.node = kv.value;
 			r_child_nodes->push_back(child);
 		}
 	}
 }
 
-void AnimationNode::blend_animation(const StringName &p_animation, real_t p_time, real_t p_delta, bool p_seeked, real_t p_blend, int p_pingponged) {
-	ERR_FAIL_COND(!state);
-	ERR_FAIL_COND(!state->player->has_animation(p_animation));
+void AnimationNode::blend_animation(ProcessState &p_process_state, AnimationNodeInstance &p_instance, const StringName &p_animation, AnimationMixer::PlaybackInfo &p_playback_info) {
+	p_playback_info.track_weights = &p_instance.track_weights;
+	p_process_state.tree->make_animation_instance(p_animation, p_playback_info);
+}
 
-	Ref<Animation> animation = state->player->get_animation(p_animation);
+AnimationNode::NodeTimeInfo AnimationNode::_pre_process(ProcessState &p_process_state, AnimationNodeInstance &p_instance, const AnimationMixer::PlaybackInfo &p_playback_info, bool p_test_only) {
+	ERR_FAIL_NULL_V(tls_process_state, NodeTimeInfo()); // Should not ever happen.
+	ERR_FAIL_COND_V_MSG(tls_process_state != &p_process_state, NodeTimeInfo(), "AnimationNodes can only be processed from within their own AnimationTree.");
 
-	if (animation.is_null()) {
-		AnimationNodeBlendTree *btree = Object::cast_to<AnimationNodeBlendTree>(parent);
-		if (btree) {
-			String name = btree->get_node_name(Ref<AnimationNodeAnimation>(this));
-			make_invalid(vformat(RTR("In node '%s', invalid animation: '%s'."), name, p_animation));
-		} else {
-			make_invalid(vformat(RTR("Invalid animation: '%s'."), p_animation));
+	AnimationNodeInstance *prev_instance = current_instance;
+
+	current_instance = &p_instance;
+	NodeTimeInfo nti = process(p_process_state, p_instance, p_playback_info, p_test_only);
+	current_instance = prev_instance;
+
+	return nti;
+}
+
+void AnimationNode::add_validation_error(const AnimationTree *p_tree, const StringName &p_path, const String &p_error, int p_input_index) const {
+	p_tree->_add_validation_error(p_path, p_error, p_input_index);
+}
+
+void AnimationNode::make_invalid(ProcessState &p_process_state, AnimationNodeInstance &p_instance, const String &p_reason) {
+	p_process_state.valid = false;
+
+	// TODO:
+	// Currently, if the AnimationTree stops due to an error as valid state at runtime, there is no way for the user to be aware of the error.
+	// I assume we should output an error when there is a change in p_process_state.valid between frames.
+	// Caching invalid_instance and checking the difference every frame is accurate, but it is somewhat costly and therefore likely not preferred.
+	// If we were to implement it, we should add an option in the project settings' animation tab, like `enum PrintErrorMode: {NONE, LOOSE, STRICT}`.
+	InvalidInstance &invalid_instance = p_process_state.invalid_instances[p_instance.path];
+	invalid_instance.errors.push_back(p_reason);
+}
+
+AnimationNode::NodeTimeInfo AnimationNode::blend_input(ProcessState &p_process_state, AnimationNodeInstance &p_instance, int p_input, const AnimationMixer::PlaybackInfo &p_playback_info, FilterAction p_filter, bool p_sync, bool p_test_only) {
+	ERR_FAIL_INDEX_V(p_input, (int64_t)inputs.size(), NodeTimeInfo());
+
+	AnimationNodeInstance *node_instance = nullptr;
+	if (likely(p_instance.connection_instances.size() > 0)) {
+		node_instance = p_instance.connection_instances[p_input];
+	}
+	if (unlikely(!node_instance)) {
+		if (!p_test_only && p_instance.is_blended()) {
+			make_invalid(p_process_state, p_instance, vformat(RTR("Nothing connected to input %d."), p_input));
 		}
-		return;
+		return NodeTimeInfo();
 	}
 
-	ERR_FAIL_COND(!animation.is_valid());
-
-	AnimationState anim_state;
-	anim_state.blend = p_blend;
-	anim_state.track_blends = &blends;
-	anim_state.delta = p_delta;
-	anim_state.time = p_time;
-	anim_state.animation = animation;
-	anim_state.seeked = p_seeked;
-	anim_state.pingponged = p_pingponged;
-
-	state->animation_states.push_back(anim_state);
-}
-
-real_t AnimationNode::_pre_process(const StringName &p_base_path, AnimationNode *p_parent, State *p_state, real_t p_time, bool p_seek, const Vector<StringName> &p_connections) {
-	base_path = p_base_path;
-	parent = p_parent;
-	connections = p_connections;
-	state = p_state;
-
-	real_t t = process(p_time, p_seek);
-
-	state = nullptr;
-	parent = nullptr;
-	base_path = StringName();
-	connections.clear();
-
-	return t;
-}
-
-void AnimationNode::make_invalid(const String &p_reason) {
-	ERR_FAIL_COND(!state);
-	state->valid = false;
-	if (state->invalid_reasons != String()) {
-		state->invalid_reasons += "\n";
-	}
-	state->invalid_reasons += String::utf8("•  ") + p_reason;
-}
-
-real_t AnimationNode::blend_input(int p_input, real_t p_time, bool p_seek, real_t p_blend, FilterAction p_filter, bool p_optimize) {
-	ERR_FAIL_INDEX_V(p_input, inputs.size(), 0);
-	ERR_FAIL_COND_V(!state, 0);
-
-	AnimationNodeBlendTree *blend_tree = Object::cast_to<AnimationNodeBlendTree>(parent);
-	ERR_FAIL_COND_V(!blend_tree, 0);
-
-	StringName node_name = connections[p_input];
-
-	if (!blend_tree->has_node(node_name)) {
-		String name = blend_tree->get_node_name(Ref<AnimationNode>(this));
-		make_invalid(vformat(RTR("Nothing connected to input '%s' of node '%s'."), get_input_name(p_input), name));
-		return 0;
-	}
-
-	Ref<AnimationNode> node = blend_tree->get_node(node_name);
-
-	//inputs.write[p_input].last_pass = state->last_pass;
 	real_t activity = 0.0;
-	real_t ret = _blend_node(node_name, blend_tree->get_node_connection_array(node_name), nullptr, node, p_time, p_seek, p_blend, p_filter, p_optimize, &activity);
 
-	Vector<AnimationTree::Activity> *activity_ptr = state->tree->input_activity_map.getptr(base_path);
+	NodeTimeInfo nti = _blend_node(p_process_state, p_instance, *node_instance, p_playback_info, p_filter, p_sync, p_test_only, &activity);
 
-	if (activity_ptr && p_input < activity_ptr->size()) {
-		activity_ptr->write[p_input].last_pass = state->last_pass;
-		activity_ptr->write[p_input].activity = activity;
-	}
-	return ret;
+#ifdef ENABLE_ACTIVITY_TRACKING
+	LocalVector<AnimationNodeInstance::Activity> &input_activity = p_instance.input_activity;
+	input_activity[p_input].last_pass = p_process_state.last_pass;
+	input_activity[p_input].activity = activity;
+#endif
+
+	return nti;
 }
 
-real_t AnimationNode::blend_node(const StringName &p_sub_path, Ref<AnimationNode> p_node, real_t p_time, bool p_seek, real_t p_blend, FilterAction p_filter, bool p_optimize) {
-	return _blend_node(p_sub_path, Vector<StringName>(), this, p_node, p_time, p_seek, p_blend, p_filter, p_optimize);
+AnimationNode::NodeTimeInfo AnimationNode::blend_node(ProcessState &p_process_state, AnimationNodeInstance &p_instance, AnimationNodeInstance *p_other, const AnimationMixer::PlaybackInfo &p_playback_info, FilterAction p_filter, bool p_sync, bool p_test_only) {
+	ERR_FAIL_NULL_V(p_other, NodeTimeInfo());
+	return _blend_node(p_process_state, p_instance, *p_other, p_playback_info, p_filter, p_sync, p_test_only, nullptr);
 }
 
-real_t AnimationNode::_blend_node(const StringName &p_subpath, const Vector<StringName> &p_connections, AnimationNode *p_new_parent, Ref<AnimationNode> p_node, real_t p_time, bool p_seek, real_t p_blend, FilterAction p_filter, bool p_optimize, real_t *r_max) {
-	ERR_FAIL_COND_V(!p_node.is_valid(), 0);
-	ERR_FAIL_COND_V(!state, 0);
+AnimationNode::NodeTimeInfo AnimationNode::_blend_node(ProcessState &p_process_state, AnimationNodeInstance &p_instance, AnimationNodeInstance &p_other, AnimationMixer::PlaybackInfo p_playback_info, FilterAction p_filter, bool p_sync, bool p_test_only, real_t *r_activity) {
+	int blend_count = p_instance.track_weights.size();
 
-	int blend_count = blends.size();
-
-	if (p_node->blends.size() != blend_count) {
-		p_node->blends.resize(blend_count);
+	if ((int64_t)p_other.track_weights.size() != blend_count) {
+		p_other.track_weights.resize(blend_count);
 	}
 
-	real_t *blendw = p_node->blends.ptrw();
-	const real_t *blendr = blends.ptr();
+	real_t *blendw = p_other.track_weights.ptr();
+	const real_t *blendr = p_instance.track_weights.ptr();
 
 	bool any_valid = false;
 
 	if (has_filter() && is_filter_enabled() && p_filter != FILTER_IGNORE) {
-		for (int i = 0; i < blend_count; i++) {
-			blendw[i] = 0.0; //all to zero by default
-		}
+		_update_filter_cache(p_process_state, p_instance);
+		// All to zero by default.
+		memset(blendw, 0, sizeof(real_t) * blend_count);
 
-		const NodePath *K = nullptr;
-		while ((K = filter.next(K))) {
-			if (!state->track_map.has(*K)) {
-				continue;
-			}
-			int idx = state->track_map[*K];
-			blendw[idx] = 1.0; //filtered goes to one
+		for (const int idx : p_instance.filtered_track_indices_cache) {
+			blendw[idx] = 1.0; // Filtered goes to one.
 		}
 
 		switch (p_filter) {
 			case FILTER_IGNORE:
-				break; //will not happen anyway
+				break; // Will not happen anyway.
 			case FILTER_PASS: {
-				//values filtered pass, the rest don't
+				// Values filtered pass, the rest don't.
 				for (int i = 0; i < blend_count; i++) {
-					if (blendw[i] == 0) { //not filtered, does not pass
+					if (blendw[i] == 0) { // Not filtered, does not pass.
 						continue;
 					}
 
-					blendw[i] = blendr[i] * p_blend;
-					if (blendw[i] > CMP_EPSILON) {
+					blendw[i] = blendr[i] * p_playback_info.weight;
+					if (!Math::is_zero_approx(blendw[i])) {
 						any_valid = true;
 					}
 				}
 
 			} break;
 			case FILTER_STOP: {
-				//values filtered don't pass, the rest are blended
+				// Values filtered don't pass, the rest are blended.
 
 				for (int i = 0; i < blend_count; i++) {
-					if (blendw[i] > 0) { //filtered, does not pass
+					if (blendw[i] > 0) { // Filtered, does not pass.
 						continue;
 					}
 
-					blendw[i] = blendr[i] * p_blend;
-					if (blendw[i] > CMP_EPSILON) {
+					blendw[i] = blendr[i] * p_playback_info.weight;
+					if (!Math::is_zero_approx(blendw[i])) {
 						any_valid = true;
 					}
 				}
 
 			} break;
 			case FILTER_BLEND: {
-				//filtered values are blended, the rest are passed without blending
+				// Filtered values are blended, the rest are passed without blending.
 
 				for (int i = 0; i < blend_count; i++) {
 					if (blendw[i] == 1.0) {
-						blendw[i] = blendr[i] * p_blend; //filtered, blend
+						blendw[i] = blendr[i] * p_playback_info.weight; // Filtered, blend.
 					} else {
-						blendw[i] = blendr[i]; //not filtered, do not blend
+						blendw[i] = blendr[i]; // Not filtered, do not blend.
 					}
 
-					if (blendw[i] > CMP_EPSILON) {
+					if (!Math::is_zero_approx(blendw[i])) {
 						any_valid = true;
 					}
 				}
@@ -258,104 +243,160 @@ real_t AnimationNode::_blend_node(const StringName &p_subpath, const Vector<Stri
 		}
 	} else {
 		for (int i = 0; i < blend_count; i++) {
-			//regular blend
-			blendw[i] = blendr[i] * p_blend;
-			if (blendw[i] > CMP_EPSILON) {
+			// Regular blend.
+			blendw[i] = blendr[i] * p_playback_info.weight;
+			if (!Math::is_zero_approx(blendw[i])) {
 				any_valid = true;
 			}
 		}
 	}
 
-	if (r_max) {
-		*r_max = 0;
+	if (r_activity) {
+		*r_activity = 0;
+#ifdef ENABLE_ACTIVITY_TRACKING
 		for (int i = 0; i < blend_count; i++) {
-			*r_max = MAX(*r_max, blendw[i]);
+			*r_activity = MAX(*r_activity, Math::abs(blendw[i]));
 		}
+#endif
 	}
 
-	if (!p_seek && p_optimize && !any_valid) { //pointless to go on, all are zero
-		return 0;
+	// This process, which depends on p_sync is needed to process sync correctly in the case of
+	// that a synced AnimationNodeSync exists under the un-synced AnimationNodeSync.
+	if (!p_playback_info.seeked && !p_sync && !any_valid) {
+		p_playback_info.delta = 0.0;
 	}
+	p_other.blended = any_valid;
+	return p_other.resource->_pre_process(p_process_state, p_other, p_playback_info, p_test_only);
+}
 
-	String new_path;
-	AnimationNode *new_parent;
+String AnimationNode::get_caption() const {
+	String ret = "Node";
+	GDVIRTUAL_CALL(_get_caption, ret);
+	return ret;
+}
 
-	//this is the slowest part of processing, but as strings process in powers of 2, and the paths always exist, it will not result in that many allocations
-	if (p_new_parent) {
-		new_parent = p_new_parent;
-		new_path = String(base_path) + String(p_subpath) + "/";
-	} else {
-		ERR_FAIL_COND_V(!parent, 0);
-		new_parent = parent;
-		new_path = String(parent->base_path) + String(p_subpath) + "/";
-	}
-	return p_node->_pre_process(new_path, new_parent, state, p_time, p_seek, p_connections);
+bool AnimationNode::add_input(const String &p_name) {
+	// Root nodes can't add inputs.
+	ERR_FAIL_COND_V(Object::cast_to<AnimationRootNode>(this) != nullptr, false);
+	Input input;
+	ERR_FAIL_COND_V(p_name.contains_char('.') || p_name.contains_char('/'), false);
+	input.name = p_name;
+	inputs.push_back(input);
+	emit_changed();
+	return true;
+}
+
+void AnimationNode::remove_input(int p_index) {
+	ERR_FAIL_INDEX(p_index, (int64_t)inputs.size());
+	inputs.remove_at(p_index);
+	emit_changed();
+}
+
+bool AnimationNode::set_input_name(int p_input, const String &p_name) {
+	ERR_FAIL_INDEX_V(p_input, (int64_t)inputs.size(), false);
+	ERR_FAIL_COND_V(p_name.contains_char('.') || p_name.contains_char('/'), false);
+	inputs[p_input].name = p_name;
+	emit_changed();
+	return true;
+}
+
+String AnimationNode::get_input_name(int p_input) const {
+	ERR_FAIL_INDEX_V(p_input, (int64_t)inputs.size(), String());
+	return inputs[p_input].name;
 }
 
 int AnimationNode::get_input_count() const {
 	return inputs.size();
 }
 
-String AnimationNode::get_input_name(int p_input) {
-	ERR_FAIL_INDEX_V(p_input, inputs.size(), String());
-	return inputs[p_input].name;
+int AnimationNode::find_input(const String &p_name) const {
+	int idx = -1;
+	for (int i = 0; i < (int64_t)inputs.size(); i++) {
+		if (inputs[i].name == p_name) {
+			idx = i;
+			break;
+		}
+	}
+	return idx;
 }
 
-String AnimationNode::get_caption() const {
-	String ret;
-	if (GDVIRTUAL_CALL(_get_caption, ret)) {
-		return ret;
+AnimationNode::NodeTimeInfo AnimationNode::process(ProcessState &p_process_state, AnimationNodeInstance &p_instance, const AnimationMixer::PlaybackInfo &p_playback_info, bool p_test_only) {
+	p_process_state.is_testing = p_test_only;
+
+	double &length = *VariantInternal::get_float(p_instance.parameter_ptrs_by_slot[AnimationNodeInstance::SLOT_CURRENT_LENGTH]);
+	double &position = *VariantInternal::get_float(p_instance.parameter_ptrs_by_slot[AnimationNodeInstance::SLOT_CURRENT_POSITION]);
+	double &delta = *VariantInternal::get_float(p_instance.parameter_ptrs_by_slot[AnimationNodeInstance::SLOT_CURRENT_DELTA]);
+
+	AnimationMixer::PlaybackInfo pi = p_playback_info;
+	if (p_playback_info.seeked) {
+		if (p_playback_info.is_external_seeking) {
+			pi.delta = position - p_playback_info.time;
+		}
+	} else {
+		pi.time = position + get_process_delta(p_instance, p_playback_info);
 	}
 
-	return "Node";
-}
+	NodeTimeInfo nti = _process(p_process_state, p_instance, pi, p_test_only);
 
-void AnimationNode::add_input(const String &p_name) {
-	//root nodes can't add inputs
-	ERR_FAIL_COND(Object::cast_to<AnimationRootNode>(this) != nullptr);
-	Input input;
-	ERR_FAIL_COND(p_name.find(".") != -1 || p_name.find("/") != -1);
-	input.name = p_name;
-	inputs.push_back(input);
-	emit_changed();
-}
-
-void AnimationNode::set_input_name(int p_input, const String &p_name) {
-	ERR_FAIL_INDEX(p_input, inputs.size());
-	ERR_FAIL_COND(p_name.find(".") != -1 || p_name.find("/") != -1);
-	inputs.write[p_input].name = p_name;
-	emit_changed();
-}
-
-void AnimationNode::remove_input(int p_index) {
-	ERR_FAIL_INDEX(p_index, inputs.size());
-	inputs.remove_at(p_index);
-	emit_changed();
-}
-
-double AnimationNode::process(double p_time, bool p_seek) {
-	double ret;
-	if (GDVIRTUAL_CALL(_process, p_time, p_seek, ret)) {
-		return ret;
+	if (!p_test_only) {
+		length = nti.length;
+		position = nti.position;
+		delta = nti.delta;
 	}
 
-	return 0;
+	return nti;
+}
+
+AnimationNode::NodeTimeInfo AnimationNode::_process(ProcessState &p_process_state, AnimationNodeInstance &p_instance, const AnimationMixer::PlaybackInfo &p_playback_info, bool p_test_only) {
+	double r_ret = 0.0;
+	GDVIRTUAL_CALL(_process, p_playback_info.time, p_playback_info.seeked, p_playback_info.is_external_seeking, p_test_only, r_ret);
+	NodeTimeInfo nti;
+	nti.delta = r_ret;
+	return nti;
 }
 
 void AnimationNode::set_filter_path(const NodePath &p_path, bool p_enable) {
 	if (p_enable) {
-		filter[p_path] = true;
+		(void)p_path.hash(); // Make sure the cache is valid.
+		filter.insert(p_path);
 	} else {
 		filter.erase(p_path);
 	}
+	_mark_filters_dirty();
 }
 
 void AnimationNode::set_filter_enabled(bool p_enable) {
 	filter_enabled = p_enable;
+	_mark_filters_dirty();
 }
 
 bool AnimationNode::is_filter_enabled() const {
 	return filter_enabled;
+}
+
+void AnimationNode::_mark_filters_dirty() {
+	filters_version++;
+	if (unlikely(filters_version == 0)) {
+		filters_version = 1;
+	}
+}
+
+void AnimationNode::set_deletable(bool p_closable) {
+	closable = p_closable;
+}
+
+bool AnimationNode::is_deletable() const {
+	return closable;
+}
+
+ObjectID AnimationNode::get_processing_animation_tree_instance_id() const {
+	ERR_FAIL_NULL_V(tls_process_state, ObjectID());
+	return tls_process_state->tree->get_instance_id();
+}
+
+bool AnimationNode::is_process_testing() const {
+	ERR_FAIL_NULL_V(tls_process_state, false);
+	return tls_process_state->is_testing;
 }
 
 bool AnimationNode::is_path_filtered(const NodePath &p_path) const {
@@ -363,22 +404,18 @@ bool AnimationNode::is_path_filtered(const NodePath &p_path) const {
 }
 
 bool AnimationNode::has_filter() const {
-	bool ret;
-	if (GDVIRTUAL_CALL(_has_filter, ret)) {
-		return ret;
-	}
-
-	return false;
+	bool ret = false;
+	GDVIRTUAL_CALL(_has_filter, ret);
+	return ret;
 }
 
 Array AnimationNode::_get_filters() const {
 	Array paths;
 
-	const NodePath *K = nullptr;
-	while ((K = filter.next(K))) {
-		paths.push_back(String(*K)); //use strings, so sorting is possible
+	for (const NodePath &E : filter) {
+		paths.push_back(String(E)); // Use strings, so sorting is possible.
 	}
-	paths.sort(); //done so every time the scene is saved, it does not change
+	paths.sort(); // Done so every time the scene is saved, it does not change.
 
 	return paths;
 }
@@ -390,26 +427,130 @@ void AnimationNode::_set_filters(const Array &p_filters) {
 	}
 }
 
-void AnimationNode::_validate_property(PropertyInfo &property) const {
-	if (!has_filter() && (property.name == "filter_enabled" || property.name == "filters")) {
-		property.usage = PROPERTY_USAGE_NONE;
+void AnimationNode::_update_filter_cache(const ProcessState &p_process_state, const AnimationNodeInstance &p_instance) {
+	bool filters_dirty = p_instance.filters_version != filters_version;
+	if (!p_process_state.track_map_updated && !filters_dirty) {
+		return; // Cache is valid.
+	}
+
+	p_instance.filtered_track_indices_cache.clear();
+	if (p_instance.filtered_track_indices_cache.size() < filter.size()) {
+		p_instance.filtered_track_indices_cache.reserve(filter.size());
+	}
+
+	for (const NodePath &path : filter) {
+		if (const int *p = p_process_state.track_map->getptr(path)) {
+			p_instance.filtered_track_indices_cache.push_back(*p);
+		}
+	}
+	p_instance.filters_version = filters_version;
+}
+
+void AnimationNode::_validate_property(PropertyInfo &p_property) const {
+	if (!has_filter() && (p_property.name == "filter_enabled" || p_property.name == "filters")) {
+		p_property.usage = PROPERTY_USAGE_NONE;
 	}
 }
 
-Ref<AnimationNode> AnimationNode::get_child_by_name(const StringName &p_name) {
+Ref<AnimationNode> AnimationNode::get_child_by_name(const StringName &p_name) const {
 	Ref<AnimationNode> ret;
-	if (GDVIRTUAL_CALL(_get_child_by_name, p_name, ret)) {
-		return ret;
-	}
-	return Ref<AnimationNode>();
+	GDVIRTUAL_CALL(_get_child_by_name, p_name, ret);
+	return ret;
 }
+
+Ref<AnimationNode> AnimationNode::find_node_by_path(const String &p_name) const {
+	Vector<String> split = p_name.split("/");
+	Ref<AnimationNode> ret = const_cast<AnimationNode *>(this);
+	for (int i = 0; i < split.size(); i++) {
+		ret = ret->get_child_by_name(split[i]);
+		if (ret.is_null()) {
+			break;
+		}
+	}
+	return ret;
+}
+
+void AnimationNode::blend_animation_ex(const StringName &p_animation, double p_time, double p_delta, bool p_seeked, bool p_is_external_seeking, real_t p_blend, Animation::LoopedFlag p_looped_flag) {
+	ERR_FAIL_NULL(tls_process_state);
+	ERR_FAIL_NULL(current_instance);
+
+	AnimationMixer::PlaybackInfo info;
+	info.time = p_time;
+	info.delta = p_delta;
+	info.seeked = p_seeked;
+	info.is_external_seeking = p_is_external_seeking;
+	info.weight = p_blend;
+	info.looped_flag = p_looped_flag;
+
+	blend_animation(*tls_process_state, *current_instance, p_animation, info);
+}
+
+double AnimationNode::blend_node_ex(const StringName &p_sub_path, const Ref<AnimationNode> &p_node, double p_time, bool p_seek, bool p_is_external_seeking, real_t p_blend, FilterAction p_filter, bool p_sync, bool p_test_only) {
+	ERR_FAIL_NULL_V(tls_process_state, 0.0);
+	ERR_FAIL_NULL_V(current_instance, 0.0);
+
+	AnimationNodeInstance *other_instance = current_instance->get_child_instance_by_path_or_null(p_sub_path);
+	ERR_FAIL_NULL_V_MSG(other_instance, 0.0, vformat("The sub-path '%s' does not exist under the current node instance.", String(p_sub_path)));
+
+	AnimationMixer::PlaybackInfo info;
+	info.time = p_time;
+	info.seeked = p_seek;
+	info.is_external_seeking = p_is_external_seeking;
+	info.weight = p_blend;
+
+	NodeTimeInfo nti = blend_node(*tls_process_state, *current_instance, other_instance, info, p_filter, p_sync, p_test_only);
+	return nti.length - nti.position;
+}
+
+double AnimationNode::blend_input_ex(int p_input, double p_time, bool p_seek, bool p_is_external_seeking, real_t p_blend, FilterAction p_filter, bool p_sync, bool p_test_only) {
+	ERR_FAIL_NULL_V(tls_process_state, 0.0);
+	ERR_FAIL_NULL_V(current_instance, 0.0);
+
+	AnimationMixer::PlaybackInfo info;
+	info.time = p_time;
+	info.seeked = p_seek;
+	info.is_external_seeking = p_is_external_seeking;
+	info.weight = p_blend;
+
+	NodeTimeInfo nti = blend_input(*tls_process_state, *current_instance, p_input, info, p_filter, p_sync, p_test_only);
+	return nti.length - nti.position;
+}
+
+#ifdef TOOLS_ENABLED
+void AnimationNode::get_argument_options(const StringName &p_function, int p_idx, List<String> *r_options) const {
+	const String pf = p_function;
+	if (p_idx == 0) {
+		if (pf == "find_input") {
+			for (const AnimationNode::Input &E : inputs) {
+				r_options->push_back(E.name.quote());
+			}
+		} else if (pf == "get_parameter" || pf == "set_parameter") {
+			bool is_setter = pf == "set_parameter";
+			LocalVector<PropertyInfo> parameters;
+			get_parameter_list(&parameters);
+			for (const PropertyInfo &E : parameters) {
+				if (is_setter && is_parameter_read_only(E.name)) {
+					continue;
+				}
+				r_options->push_back(E.name.quote());
+			}
+		} else if (pf == "set_filter_path" || pf == "is_path_filtered") {
+			for (const NodePath &E : filter) {
+				r_options->push_back(String(E).quote());
+			}
+		}
+	}
+	Resource::get_argument_options(p_function, p_idx, r_options);
+}
+#endif
 
 void AnimationNode::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("get_input_count"), &AnimationNode::get_input_count);
-	ClassDB::bind_method(D_METHOD("get_input_name", "input"), &AnimationNode::get_input_name);
-
 	ClassDB::bind_method(D_METHOD("add_input", "name"), &AnimationNode::add_input);
 	ClassDB::bind_method(D_METHOD("remove_input", "index"), &AnimationNode::remove_input);
+	ClassDB::bind_method(D_METHOD("set_input_name", "input", "name"), &AnimationNode::set_input_name);
+	ClassDB::bind_method(D_METHOD("get_input_name", "input"), &AnimationNode::get_input_name);
+	ClassDB::bind_method(D_METHOD("get_input_count"), &AnimationNode::get_input_count);
+	ClassDB::bind_method(D_METHOD("find_input", "name"), &AnimationNode::find_input);
 
 	ClassDB::bind_method(D_METHOD("set_filter_path", "path", "enable"), &AnimationNode::set_filter_path);
 	ClassDB::bind_method(D_METHOD("is_path_filtered", "path"), &AnimationNode::is_path_filtered);
@@ -417,15 +558,19 @@ void AnimationNode::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_filter_enabled", "enable"), &AnimationNode::set_filter_enabled);
 	ClassDB::bind_method(D_METHOD("is_filter_enabled"), &AnimationNode::is_filter_enabled);
 
+	ClassDB::bind_method(D_METHOD("get_processing_animation_tree_instance_id"), &AnimationNode::get_processing_animation_tree_instance_id);
+
+	ClassDB::bind_method(D_METHOD("is_process_testing"), &AnimationNode::is_process_testing);
+
 	ClassDB::bind_method(D_METHOD("_set_filters", "filters"), &AnimationNode::_set_filters);
 	ClassDB::bind_method(D_METHOD("_get_filters"), &AnimationNode::_get_filters);
 
-	ClassDB::bind_method(D_METHOD("blend_animation", "animation", "time", "delta", "seeked", "blend", "pingponged"), &AnimationNode::blend_animation, DEFVAL(0));
-	ClassDB::bind_method(D_METHOD("blend_node", "name", "node", "time", "seek", "blend", "filter", "optimize"), &AnimationNode::blend_node, DEFVAL(FILTER_IGNORE), DEFVAL(true));
-	ClassDB::bind_method(D_METHOD("blend_input", "input_index", "time", "seek", "blend", "filter", "optimize"), &AnimationNode::blend_input, DEFVAL(FILTER_IGNORE), DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("blend_animation", "animation", "time", "delta", "seeked", "is_external_seeking", "blend", "looped_flag"), &AnimationNode::blend_animation_ex, DEFVAL(Animation::LOOPED_FLAG_NONE));
+	ClassDB::bind_method(D_METHOD("blend_node", "name", "node", "time", "seek", "is_external_seeking", "blend", "filter", "sync", "test_only"), &AnimationNode::blend_node_ex, DEFVAL(FILTER_IGNORE), DEFVAL(true), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("blend_input", "input_index", "time", "seek", "is_external_seeking", "blend", "filter", "sync", "test_only"), &AnimationNode::blend_input_ex, DEFVAL(FILTER_IGNORE), DEFVAL(true), DEFVAL(false));
 
-	ClassDB::bind_method(D_METHOD("set_parameter", "name", "value"), &AnimationNode::set_parameter);
-	ClassDB::bind_method(D_METHOD("get_parameter", "name"), &AnimationNode::get_parameter);
+	ClassDB::bind_method(D_METHOD("set_parameter", "name", "value"), &AnimationNode::set_parameter_ex);
+	ClassDB::bind_method(D_METHOD("get_parameter", "name"), &AnimationNode::get_parameter_ex);
 
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "filter_enabled", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NO_EDITOR), "set_filter_enabled", "is_filter_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "filters", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NO_EDITOR | PROPERTY_USAGE_INTERNAL), "_set_filters", "_get_filters");
@@ -434,13 +579,17 @@ void AnimationNode::_bind_methods() {
 	GDVIRTUAL_BIND(_get_parameter_list);
 	GDVIRTUAL_BIND(_get_child_by_name, "name");
 	GDVIRTUAL_BIND(_get_parameter_default_value, "parameter");
-	GDVIRTUAL_BIND(_process, "time", "seek");
+	GDVIRTUAL_BIND(_is_parameter_read_only, "parameter");
+	GDVIRTUAL_BIND(_process, "time", "seek", "is_external_seeking", "test_only");
 	GDVIRTUAL_BIND(_get_caption);
 	GDVIRTUAL_BIND(_has_filter);
 
-	ADD_SIGNAL(MethodInfo("removed_from_graph"));
-
+	// For "tree_changed", wouldn't it be nice, if we could pass in the source?
+	// That way we would be able to partially rebuild instances.
 	ADD_SIGNAL(MethodInfo("tree_changed"));
+	ADD_SIGNAL(MethodInfo("node_updated", PropertyInfo(Variant::INT, "object_id")));
+	ADD_SIGNAL(MethodInfo("animation_node_renamed", PropertyInfo(Variant::INT, "object_id"), PropertyInfo(Variant::STRING, "old_name"), PropertyInfo(Variant::STRING, "new_name")));
+	ADD_SIGNAL(MethodInfo("animation_node_removed", PropertyInfo(Variant::INT, "object_id"), PropertyInfo(Variant::STRING, "node_name")));
 
 	BIND_ENUM_CONSTANT(FILTER_IGNORE);
 	BIND_ENUM_CONSTANT(FILTER_PASS);
@@ -453,15 +602,53 @@ AnimationNode::AnimationNode() {
 
 ////////////////////
 
-void AnimationTree::set_tree_root(const Ref<AnimationNode> &p_root) {
-	if (root.is_valid()) {
-		root->disconnect("tree_changed", callable_mp(this, &AnimationTree::_tree_changed));
+void AnimationRootNode::_add_node(const Ref<AnimationNode> &p_node) {
+	p_node->connect(SNAME("tree_changed"), callable_mp(this, &AnimationRootNode::_tree_changed), CONNECT_REFERENCE_COUNTED);
+	p_node->connect(SNAME("node_updated"), callable_mp(this, &AnimationRootNode::_node_updated), CONNECT_REFERENCE_COUNTED);
+	p_node->connect(SNAME("animation_node_renamed"), callable_mp(this, &AnimationRootNode::_animation_node_renamed), CONNECT_REFERENCE_COUNTED);
+	p_node->connect(SNAME("animation_node_removed"), callable_mp(this, &AnimationRootNode::_animation_node_removed), CONNECT_REFERENCE_COUNTED);
+}
+
+void AnimationRootNode::_remove_node(const Ref<AnimationNode> &p_node) {
+	p_node->disconnect(SNAME("tree_changed"), callable_mp(this, &AnimationRootNode::_tree_changed));
+	p_node->disconnect(SNAME("node_updated"), callable_mp(this, &AnimationRootNode::_node_updated));
+	p_node->disconnect(SNAME("animation_node_renamed"), callable_mp(this, &AnimationRootNode::_animation_node_renamed));
+	p_node->disconnect(SNAME("animation_node_removed"), callable_mp(this, &AnimationRootNode::_animation_node_removed));
+}
+
+void AnimationRootNode::_tree_changed() {
+	emit_signal(SNAME("tree_changed"));
+}
+
+void AnimationRootNode::_node_updated(const ObjectID &p_oid) {
+	emit_signal(SNAME("node_updated"), p_oid);
+}
+
+void AnimationRootNode::_animation_node_renamed(const ObjectID &p_oid, const String &p_old_name, const String &p_new_name) {
+	emit_signal(SNAME("animation_node_renamed"), p_oid, p_old_name, p_new_name);
+}
+
+void AnimationRootNode::_animation_node_removed(const ObjectID &p_oid, const StringName &p_node) {
+	emit_signal(SNAME("animation_node_removed"), p_oid, p_node);
+}
+
+////////////////////
+
+void AnimationTree::set_root_animation_node(const Ref<AnimationRootNode> &p_animation_node) {
+	if (root_animation_node.is_valid()) {
+		root_animation_node->disconnect(SNAME("tree_changed"), callable_mp(this, &AnimationTree::_tree_changed));
+		root_animation_node->disconnect(SNAME("node_updated"), callable_mp(this, &AnimationTree::_node_updated));
+		root_animation_node->disconnect(SNAME("animation_node_renamed"), callable_mp(this, &AnimationTree::_animation_node_renamed));
+		root_animation_node->disconnect(SNAME("animation_node_removed"), callable_mp(this, &AnimationTree::_animation_node_removed));
 	}
 
-	root = p_root;
+	root_animation_node = p_animation_node;
 
-	if (root.is_valid()) {
-		root->connect("tree_changed", callable_mp(this, &AnimationTree::_tree_changed));
+	if (root_animation_node.is_valid()) {
+		root_animation_node->connect(SNAME("tree_changed"), callable_mp(this, &AnimationTree::_tree_changed));
+		root_animation_node->connect(SNAME("node_updated"), callable_mp(this, &AnimationTree::_node_updated));
+		root_animation_node->connect(SNAME("animation_node_renamed"), callable_mp(this, &AnimationTree::_animation_node_renamed));
+		root_animation_node->connect(SNAME("animation_node_removed"), callable_mp(this, &AnimationTree::_animation_node_removed));
 	}
 
 	properties_dirty = true;
@@ -469,1203 +656,105 @@ void AnimationTree::set_tree_root(const Ref<AnimationNode> &p_root) {
 	update_configuration_warnings();
 }
 
-Ref<AnimationNode> AnimationTree::get_tree_root() const {
-	return root;
+Ref<AnimationRootNode> AnimationTree::get_root_animation_node() const {
+	return root_animation_node;
 }
 
-void AnimationTree::set_active(bool p_active) {
-	if (active == p_active) {
-		return;
+bool AnimationTree::_blend_pre_process(double p_delta, int p_track_count, const AHashMap<NodePath, int> &p_track_map) {
+	_update_properties(); // If properties need updating, update them.
+
+	if (root_animation_node.is_null()) {
+		process_state = AnimationNode::ProcessState();
+		return false; // Abort after _update_properties() and init process_state.
 	}
 
-	active = p_active;
-	started = active;
-
-	if (process_callback == ANIMATION_PROCESS_IDLE) {
-		set_process_internal(active);
-	} else {
-		set_physics_process_internal(active);
+	if (validation_dirty) {
+		_update_connections();
+		validation_dirty = false;
 	}
 
-	if (!active && is_inside_tree()) {
-		for (Set<TrackCache *>::Element *E = playing_caches.front(); E; E = E->next()) {
-			if (ObjectDB::get_instance(E->get()->object_id)) {
-				E->get()->object->call("stop");
-			}
+	AnimationNodeInstance &instance = get_node_instance_by_path(SNAME(Animation::PARAMETERS_BASE_PATH.ascii().get_data()));
+
+	{ // Setup.
+		process_pass++;
+		if (unlikely(process_pass == 0)) {
+			process_pass = 1;
 		}
 
-		playing_caches.clear();
-	}
-}
+		// Init process state.
+		process_state = AnimationNode::ProcessState();
+		process_state.tree = this;
+		process_state.valid = true;
+		process_state.invalid_instances.clear();
+		process_state.last_pass = process_pass;
+		process_state.track_map = &p_track_map;
+		process_state.track_map_updated = track_map_version != last_track_map_version;
+		process_state.is_testing = false;
 
-bool AnimationTree::is_active() const {
-	return active;
-}
+		last_track_map_version = track_map_version;
 
-void AnimationTree::set_process_callback(AnimationProcessCallback p_mode) {
-	if (process_callback == p_mode) {
-		return;
-	}
-
-	bool was_active = is_active();
-	if (was_active) {
-		set_active(false);
-	}
-
-	process_callback = p_mode;
-
-	if (was_active) {
-		set_active(true);
-	}
-}
-
-AnimationTree::AnimationProcessCallback AnimationTree::get_process_callback() const {
-	return process_callback;
-}
-
-void AnimationTree::_node_removed(Node *p_node) {
-	cache_valid = false;
-}
-
-bool AnimationTree::_update_caches(AnimationPlayer *player) {
-	setup_pass++;
-
-	if (!player->has_node(player->get_root())) {
-		ERR_PRINT("AnimationTree: AnimationPlayer root is invalid.");
-		set_active(false);
-		return false;
-	}
-	Node *parent = player->get_node(player->get_root());
-
-	List<StringName> sname;
-	player->get_animation_list(&sname);
-
-	for (const StringName &E : sname) {
-		Ref<Animation> anim = player->get_animation(E);
-		for (int i = 0; i < anim->get_track_count(); i++) {
-			NodePath path = anim->track_get_path(i);
-			Animation::TrackType track_type = anim->track_get_type(i);
-
-			Animation::TrackType track_cache_type = track_type;
-			if (track_cache_type == Animation::TYPE_POSITION_3D || track_cache_type == Animation::TYPE_ROTATION_3D || track_cache_type == Animation::TYPE_SCALE_3D) {
-				track_cache_type = Animation::TYPE_POSITION_3D; //reference them as position3D tracks, even if they modify rotation or scale
-			}
-
-			TrackCache *track = nullptr;
-			if (track_cache.has(path)) {
-				track = track_cache.get(path);
-			}
-
-			//if not valid, delete track
-			if (track && (track->type != track_cache_type || ObjectDB::get_instance(track->object_id) == nullptr)) {
-				playing_caches.erase(track);
-				memdelete(track);
-				track_cache.erase(path);
-				track = nullptr;
-			}
-
-			if (!track) {
-				RES resource;
-				Vector<StringName> leftover_path;
-				Node *child = parent->get_node_and_resource(path, resource, leftover_path);
-
-				if (!child) {
-					ERR_PRINT("AnimationTree: '" + String(E) + "', couldn't resolve track:  '" + String(path) + "'");
-					continue;
-				}
-
-				if (!child->is_connected("tree_exited", callable_mp(this, &AnimationTree::_node_removed))) {
-					child->connect("tree_exited", callable_mp(this, &AnimationTree::_node_removed), varray(child));
-				}
-
-				switch (track_type) {
-					case Animation::TYPE_VALUE: {
-						TrackCacheValue *track_value = memnew(TrackCacheValue);
-
-						if (resource.is_valid()) {
-							track_value->object = resource.ptr();
-						} else {
-							track_value->object = child;
-						}
-
-						track_value->subpath = leftover_path;
-						track_value->object_id = track_value->object->get_instance_id();
-
-						track = track_value;
-
-					} break;
-					case Animation::TYPE_POSITION_3D:
-					case Animation::TYPE_ROTATION_3D:
-					case Animation::TYPE_SCALE_3D: {
-#ifndef _3D_DISABLED
-						Node3D *node_3d = Object::cast_to<Node3D>(child);
-
-						if (!node_3d) {
-							ERR_PRINT("AnimationTree: '" + String(E) + "', transform track does not point to Node3D:  '" + String(path) + "'");
-							continue;
-						}
-
-						TrackCacheTransform *track_xform = memnew(TrackCacheTransform);
-						track_xform->type = Animation::TYPE_POSITION_3D;
-
-						track_xform->node_3d = node_3d;
-						track_xform->skeleton = nullptr;
-						track_xform->bone_idx = -1;
-
-						if (path.get_subname_count() == 1 && Object::cast_to<Skeleton3D>(node_3d)) {
-							Skeleton3D *sk = Object::cast_to<Skeleton3D>(node_3d);
-							track_xform->skeleton = sk;
-							int bone_idx = sk->find_bone(path.get_subname(0));
-							if (bone_idx != -1) {
-								track_xform->bone_idx = bone_idx;
-							}
-						}
-
-						track_xform->object = node_3d;
-						track_xform->object_id = track_xform->object->get_instance_id();
-
-						track = track_xform;
-
-						switch (track_type) {
-							case Animation::TYPE_POSITION_3D: {
-								track_xform->loc_used = true;
-							} break;
-							case Animation::TYPE_ROTATION_3D: {
-								track_xform->rot_used = true;
-							} break;
-							case Animation::TYPE_SCALE_3D: {
-								track_xform->scale_used = true;
-							} break;
-							default: {
-							}
-						}
-
-#endif // _3D_DISABLED
-					} break;
-					case Animation::TYPE_BLEND_SHAPE: {
-#ifndef _3D_DISABLED
-
-						if (path.get_subname_count() != 1) {
-							ERR_PRINT("AnimationTree: '" + String(E) + "', blend shape track does not contain a blend shape subname:  '" + String(path) + "'");
-							continue;
-						}
-						MeshInstance3D *mesh_3d = Object::cast_to<MeshInstance3D>(child);
-
-						if (!mesh_3d) {
-							ERR_PRINT("AnimationTree: '" + String(E) + "', blend shape track does not point to MeshInstance3D:  '" + String(path) + "'");
-							continue;
-						}
-
-						StringName blend_shape_name = path.get_subname(0);
-						int blend_shape_idx = mesh_3d->find_blend_shape_by_name(blend_shape_name);
-						if (blend_shape_idx == -1) {
-							ERR_PRINT("AnimationTree: '" + String(E) + "', blend shape track points to a non-existing name:  '" + String(blend_shape_name) + "'");
-							continue;
-						}
-
-						TrackCacheBlendShape *track_bshape = memnew(TrackCacheBlendShape);
-
-						track_bshape->mesh_3d = mesh_3d;
-						track_bshape->shape_index = blend_shape_idx;
-
-						track_bshape->object = mesh_3d;
-						track_bshape->object_id = mesh_3d->get_instance_id();
-						track = track_bshape;
-#endif
-					} break;
-					case Animation::TYPE_METHOD: {
-						TrackCacheMethod *track_method = memnew(TrackCacheMethod);
-
-						if (resource.is_valid()) {
-							track_method->object = resource.ptr();
-						} else {
-							track_method->object = child;
-						}
-
-						track_method->object_id = track_method->object->get_instance_id();
-
-						track = track_method;
-
-					} break;
-					case Animation::TYPE_BEZIER: {
-						TrackCacheBezier *track_bezier = memnew(TrackCacheBezier);
-
-						if (resource.is_valid()) {
-							track_bezier->object = resource.ptr();
-						} else {
-							track_bezier->object = child;
-						}
-
-						track_bezier->subpath = leftover_path;
-						track_bezier->object_id = track_bezier->object->get_instance_id();
-
-						track = track_bezier;
-					} break;
-					case Animation::TYPE_AUDIO: {
-						TrackCacheAudio *track_audio = memnew(TrackCacheAudio);
-
-						track_audio->object = child;
-						track_audio->object_id = track_audio->object->get_instance_id();
-
-						track = track_audio;
-
-					} break;
-					case Animation::TYPE_ANIMATION: {
-						TrackCacheAnimation *track_animation = memnew(TrackCacheAnimation);
-
-						track_animation->object = child;
-						track_animation->object_id = track_animation->object->get_instance_id();
-
-						track = track_animation;
-
-					} break;
-					default: {
-						ERR_PRINT("Animation corrupted (invalid track type)");
-						continue;
-					}
-				}
-
-				track_cache[path] = track;
-			} else if (track_cache_type == Animation::TYPE_POSITION_3D) {
-				TrackCacheTransform *track_xform = static_cast<TrackCacheTransform *>(track);
-				if (track->setup_pass != setup_pass) {
-					track_xform->loc_used = false;
-					track_xform->rot_used = false;
-					track_xform->scale_used = false;
-				}
-				switch (track_type) {
-					case Animation::TYPE_POSITION_3D: {
-						track_xform->loc_used = true;
-					} break;
-					case Animation::TYPE_ROTATION_3D: {
-						track_xform->rot_used = true;
-					} break;
-					case Animation::TYPE_SCALE_3D: {
-						track_xform->scale_used = true;
-					} break;
-					default: {
-					}
-				}
-			}
-
-			track->setup_pass = setup_pass;
+		// Init node state for root AnimationNode.
+		instance.track_weights.resize(p_track_count);
+		real_t *src_blendsw = instance.track_weights.ptr();
+		for (int i = 0; i < p_track_count; i++) {
+			src_blendsw[i] = 1.0; // By default all go to 1 for the root input.
 		}
+		instance.blended = true;
+		instance.path = SNAME(Animation::PARAMETERS_BASE_PATH.ascii().get_data());
 	}
 
-	List<NodePath> to_delete;
+	// Process.
+	{
+		PlaybackInfo pi;
+		pi.delta = p_delta;
 
-	const NodePath *K = nullptr;
-	while ((K = track_cache.next(K))) {
-		TrackCache *tc = track_cache[*K];
-		if (tc->setup_pass != setup_pass) {
-			to_delete.push_back(*K);
+		if (started) {
+			started = false;
+			// If started, seek.
+			pi.seeked = true;
+		} else {
+			pi.seeked = false;
 		}
+
+		AnimationNode::tls_process_state = &process_state;
+		root_animation_node->_pre_process(process_state, instance, pi, false);
+		AnimationNode::tls_process_state = nullptr;
 	}
 
-	while (to_delete.front()) {
-		NodePath np = to_delete.front()->get();
-		memdelete(track_cache[np]);
-		track_cache.erase(np);
-		to_delete.pop_front();
+	if (!process_state.valid) {
+		return false; // State is not valid, abort process.
 	}
-
-	state.track_map.clear();
-
-	K = nullptr;
-	int idx = 0;
-	while ((K = track_cache.next(K))) {
-		state.track_map[*K] = idx;
-		idx++;
-	}
-
-	state.track_count = idx;
-
-	cache_valid = true;
 
 	return true;
 }
 
-void AnimationTree::_clear_caches() {
-	const NodePath *K = nullptr;
-	while ((K = track_cache.next(K))) {
-		memdelete(track_cache[*K]);
-	}
-	playing_caches.clear();
-
-	track_cache.clear();
-	cache_valid = false;
+void AnimationTree::_set_active(bool p_active) {
+	_set_process(p_active);
+	started = p_active;
 }
 
-void AnimationTree::_process_graph(real_t p_delta) {
-	_update_properties(); //if properties need updating, update them
-
-	//check all tracks, see if they need modification
-
-	root_motion_transform = Transform3D();
-
-	if (!root.is_valid()) {
-		ERR_PRINT("AnimationTree: root AnimationNode is not set, disabling playback.");
-		set_active(false);
-		cache_valid = false;
-		return;
-	}
-
-	if (!has_node(animation_player)) {
-		ERR_PRINT("AnimationTree: no valid AnimationPlayer path set, disabling playback");
-		set_active(false);
-		cache_valid = false;
-		return;
-	}
-
-	AnimationPlayer *player = Object::cast_to<AnimationPlayer>(get_node(animation_player));
-
-	ObjectID current_animation_player;
-
-	if (player) {
-		current_animation_player = player->get_instance_id();
-	}
-
-	if (last_animation_player != current_animation_player) {
-		if (last_animation_player.is_valid()) {
-			Object *old_player = ObjectDB::get_instance(last_animation_player);
-			if (old_player) {
-				old_player->disconnect("caches_cleared", callable_mp(this, &AnimationTree::_clear_caches));
-			}
-		}
-
-		if (player) {
-			player->connect("caches_cleared", callable_mp(this, &AnimationTree::_clear_caches));
-		}
-
-		last_animation_player = current_animation_player;
-	}
-
-	if (!player) {
-		ERR_PRINT("AnimationTree: path points to a node not an AnimationPlayer, disabling playback");
-		set_active(false);
-		cache_valid = false;
-		return;
-	}
-
-	if (!cache_valid) {
-		if (!_update_caches(player)) {
-			return;
-		}
-	}
-
-	{ //setup
-
-		process_pass++;
-
-		state.valid = true;
-		state.invalid_reasons = "";
-		state.animation_states.clear(); //will need to be re-created
-		state.valid = true;
-		state.player = player;
-		state.last_pass = process_pass;
-		state.tree = this;
-
-		// root source blends
-
-		root->blends.resize(state.track_count);
-		real_t *src_blendsw = root->blends.ptrw();
-		for (int i = 0; i < state.track_count; i++) {
-			src_blendsw[i] = 1.0; //by default all go to 1 for the root input
-		}
-	}
-
-	//process
-
-	{
-		if (started) {
-			//if started, seek
-			root->_pre_process(SceneStringNames::get_singleton()->parameters_base_path, nullptr, &state, 0, true, Vector<StringName>());
-			started = false;
-		}
-
-		root->_pre_process(SceneStringNames::get_singleton()->parameters_base_path, nullptr, &state, p_delta, false, Vector<StringName>());
-	}
-
-	if (!state.valid) {
-		return; //state is not valid. do nothing.
-	}
-	//apply value/transform/bezier blends to track caches and execute method/audio/animation tracks
-
-	{
-		bool can_call = is_inside_tree() && !Engine::get_singleton()->is_editor_hint();
-
-		for (const AnimationNode::AnimationState &as : state.animation_states) {
-			Ref<Animation> a = as.animation;
-			double time = as.time;
-			double delta = as.delta;
-			real_t weight = as.blend;
-			bool seeked = as.seeked;
-			int pingponged = as.pingponged;
-#ifndef _3D_DISABLED
-			bool backward = signbit(delta);
-#endif // _3D_DISABLED
-
-			for (int i = 0; i < a->get_track_count(); i++) {
-				NodePath path = a->track_get_path(i);
-
-				ERR_CONTINUE(!track_cache.has(path));
-
-				TrackCache *track = track_cache[path];
-
-				Animation::TrackType ttype = a->track_get_type(i);
-				if (ttype != Animation::TYPE_POSITION_3D && ttype != Animation::TYPE_ROTATION_3D && ttype != Animation::TYPE_SCALE_3D && track->type != ttype) {
-					//broken animation, but avoid error spamming
-					continue;
-				}
-
-				track->root_motion = root_motion_track == path;
-
-				ERR_CONTINUE(!state.track_map.has(path));
-				int blend_idx = state.track_map[path];
-
-				ERR_CONTINUE(blend_idx < 0 || blend_idx >= state.track_count);
-
-				real_t blend = (*as.track_blends)[blend_idx] * weight;
-
-				if (blend < CMP_EPSILON) {
-					continue; //nothing to blend
-				}
-
-				switch (ttype) {
-					case Animation::TYPE_POSITION_3D: {
-#ifndef _3D_DISABLED
-						TrackCacheTransform *t = static_cast<TrackCacheTransform *>(track);
-
-						if (t->process_pass != process_pass) {
-							t->process_pass = process_pass;
-							t->loc = Vector3();
-							t->rot = Quaternion();
-							t->rot_blend_accum = 0;
-							t->scale = Vector3(1, 1, 1);
-						}
-
-						if (track->root_motion) {
-							double prev_time = time - delta;
-							if (!backward) {
-								if (prev_time < 0) {
-									switch (a->get_loop_mode()) {
-										case Animation::LOOP_NONE: {
-											prev_time = 0;
-										} break;
-										case Animation::LOOP_LINEAR: {
-											prev_time = Math::fposmod(prev_time, (double)a->get_length());
-										} break;
-										case Animation::LOOP_PINGPONG: {
-											prev_time = Math::pingpong(prev_time, (double)a->get_length());
-										} break;
-										default:
-											break;
-									}
-								}
-							} else {
-								if (prev_time > a->get_length()) {
-									switch (a->get_loop_mode()) {
-										case Animation::LOOP_NONE: {
-											prev_time = (double)a->get_length();
-										} break;
-										case Animation::LOOP_LINEAR: {
-											prev_time = Math::fposmod(prev_time, (double)a->get_length());
-										} break;
-										case Animation::LOOP_PINGPONG: {
-											prev_time = Math::pingpong(prev_time, (double)a->get_length());
-										} break;
-										default:
-											break;
-									}
-								}
-							}
-
-							Vector3 loc[2];
-
-							if (!backward) {
-								if (prev_time > time) {
-									Error err = a->position_track_interpolate(i, prev_time, &loc[0]);
-									if (err != OK) {
-										continue;
-									}
-									a->position_track_interpolate(i, (double)a->get_length(), &loc[1]);
-									t->loc += (loc[1] - loc[0]) * blend;
-									prev_time = 0;
-								}
-							} else {
-								if (prev_time < time) {
-									Error err = a->position_track_interpolate(i, prev_time, &loc[0]);
-									if (err != OK) {
-										continue;
-									}
-									a->position_track_interpolate(i, 0, &loc[1]);
-									t->loc += (loc[1] - loc[0]) * blend;
-									prev_time = 0;
-								}
-							}
-
-							Error err = a->position_track_interpolate(i, prev_time, &loc[0]);
-							if (err != OK) {
-								continue;
-							}
-
-							a->position_track_interpolate(i, time, &loc[1]);
-							t->loc += (loc[1] - loc[0]) * blend;
-							prev_time = !backward ? 0 : (double)a->get_length();
-
-						} else {
-							Vector3 loc;
-
-							Error err = a->position_track_interpolate(i, time, &loc);
-							if (err != OK) {
-								continue;
-							}
-
-							t->loc = t->loc.lerp(loc, blend);
-						}
-#endif // _3D_DISABLED
-					} break;
-					case Animation::TYPE_ROTATION_3D: {
-#ifndef _3D_DISABLED
-						TrackCacheTransform *t = static_cast<TrackCacheTransform *>(track);
-
-						if (t->process_pass != process_pass) {
-							t->process_pass = process_pass;
-							t->loc = Vector3();
-							t->rot = Quaternion();
-							t->rot_blend_accum = 0;
-							t->scale = Vector3(1, 1, 1);
-						}
-
-						if (track->root_motion) {
-							double prev_time = time - delta;
-							if (!backward) {
-								if (prev_time < 0) {
-									switch (a->get_loop_mode()) {
-										case Animation::LOOP_NONE: {
-											prev_time = 0;
-										} break;
-										case Animation::LOOP_LINEAR: {
-											prev_time = Math::fposmod(prev_time, (double)a->get_length());
-										} break;
-										case Animation::LOOP_PINGPONG: {
-											prev_time = Math::pingpong(prev_time, (double)a->get_length());
-										} break;
-										default:
-											break;
-									}
-								}
-							} else {
-								if (prev_time > a->get_length()) {
-									switch (a->get_loop_mode()) {
-										case Animation::LOOP_NONE: {
-											prev_time = (double)a->get_length();
-										} break;
-										case Animation::LOOP_LINEAR: {
-											prev_time = Math::fposmod(prev_time, (double)a->get_length());
-										} break;
-										case Animation::LOOP_PINGPONG: {
-											prev_time = Math::pingpong(prev_time, (double)a->get_length());
-										} break;
-										default:
-											break;
-									}
-								}
-							}
-
-							Quaternion rot[2];
-
-							if (!backward) {
-								if (prev_time > time) {
-									Error err = a->rotation_track_interpolate(i, prev_time, &rot[0]);
-									if (err != OK) {
-										continue;
-									}
-									a->rotation_track_interpolate(i, (double)a->get_length(), &rot[1]);
-									Quaternion q = Quaternion().slerp(rot[0].normalized().inverse() * rot[1].normalized(), blend).normalized();
-									t->rot = (t->rot * q).normalized();
-									prev_time = 0;
-								}
-							} else {
-								if (prev_time < time) {
-									Error err = a->rotation_track_interpolate(i, prev_time, &rot[0]);
-									if (err != OK) {
-										continue;
-									}
-									a->rotation_track_interpolate(i, 0, &rot[1]);
-									Quaternion q = Quaternion().slerp(rot[0].normalized().inverse() * rot[1].normalized(), blend).normalized();
-									t->rot = (t->rot * q).normalized();
-									prev_time = 0;
-								}
-							}
-
-							Error err = a->rotation_track_interpolate(i, prev_time, &rot[0]);
-							if (err != OK) {
-								continue;
-							}
-
-							a->rotation_track_interpolate(i, time, &rot[1]);
-							Quaternion q = Quaternion().slerp(rot[0].normalized().inverse() * rot[1].normalized(), blend).normalized();
-							t->rot = (t->rot * q).normalized();
-							prev_time = !backward ? 0 : (double)a->get_length();
-
-						} else {
-							Quaternion rot;
-
-							Error err = a->rotation_track_interpolate(i, time, &rot);
-							if (err != OK) {
-								continue;
-							}
-
-							if (t->rot_blend_accum == 0) {
-								t->rot = rot;
-								t->rot_blend_accum = blend;
-							} else {
-								real_t rot_total = t->rot_blend_accum + blend;
-								t->rot = rot.slerp(t->rot, t->rot_blend_accum / rot_total).normalized();
-								t->rot_blend_accum = rot_total;
-							}
-						}
-#endif // _3D_DISABLED
-					} break;
-					case Animation::TYPE_SCALE_3D: {
-#ifndef _3D_DISABLED
-						TrackCacheTransform *t = static_cast<TrackCacheTransform *>(track);
-
-						if (t->process_pass != process_pass) {
-							t->process_pass = process_pass;
-							t->loc = Vector3();
-							t->rot = Quaternion();
-							t->rot_blend_accum = 0;
-							t->scale = Vector3(1, 1, 1);
-						}
-
-						if (track->root_motion) {
-							double prev_time = time - delta;
-							if (!backward) {
-								if (prev_time < 0) {
-									switch (a->get_loop_mode()) {
-										case Animation::LOOP_NONE: {
-											prev_time = 0;
-										} break;
-										case Animation::LOOP_LINEAR: {
-											prev_time = Math::fposmod(prev_time, (double)a->get_length());
-										} break;
-										case Animation::LOOP_PINGPONG: {
-											prev_time = Math::pingpong(prev_time, (double)a->get_length());
-										} break;
-										default:
-											break;
-									}
-								}
-							} else {
-								if (prev_time > a->get_length()) {
-									switch (a->get_loop_mode()) {
-										case Animation::LOOP_NONE: {
-											prev_time = (double)a->get_length();
-										} break;
-										case Animation::LOOP_LINEAR: {
-											prev_time = Math::fposmod(prev_time, (double)a->get_length());
-										} break;
-										case Animation::LOOP_PINGPONG: {
-											prev_time = Math::pingpong(prev_time, (double)a->get_length());
-										} break;
-										default:
-											break;
-									}
-								}
-							}
-
-							Vector3 scale[2];
-
-							if (!backward) {
-								if (prev_time > time) {
-									Error err = a->scale_track_interpolate(i, prev_time, &scale[0]);
-									if (err != OK) {
-										continue;
-									}
-									a->scale_track_interpolate(i, (double)a->get_length(), &scale[1]);
-									t->scale += (scale[1] - scale[0]) * blend;
-									prev_time = 0;
-								}
-							} else {
-								if (prev_time < time) {
-									Error err = a->scale_track_interpolate(i, prev_time, &scale[0]);
-									if (err != OK) {
-										continue;
-									}
-									a->scale_track_interpolate(i, 0, &scale[1]);
-									t->scale += (scale[1] - scale[0]) * blend;
-									prev_time = 0;
-								}
-							}
-
-							Error err = a->scale_track_interpolate(i, prev_time, &scale[0]);
-							if (err != OK) {
-								continue;
-							}
-
-							a->scale_track_interpolate(i, time, &scale[1]);
-							t->scale += (scale[1] - scale[0]) * blend;
-							prev_time = !backward ? 0 : (double)a->get_length();
-
-						} else {
-							Vector3 scale;
-
-							Error err = a->scale_track_interpolate(i, time, &scale);
-							if (err != OK) {
-								continue;
-							}
-
-							t->scale = t->scale.lerp(scale, blend);
-						}
-#endif // _3D_DISABLED
-					} break;
-					case Animation::TYPE_BLEND_SHAPE: {
-#ifndef _3D_DISABLED
-						TrackCacheBlendShape *t = static_cast<TrackCacheBlendShape *>(track);
-
-						if (t->process_pass != process_pass) {
-							t->process_pass = process_pass;
-							t->value = 0;
-						}
-
-						float value;
-
-						Error err = a->blend_shape_track_interpolate(i, time, &value);
-						//ERR_CONTINUE(err!=OK); //used for testing, should be removed
-
-						if (err != OK) {
-							continue;
-						}
-
-						t->value = Math::lerp(t->value, value, blend);
-
-#endif // _3D_DISABLED
-					} break;
-					case Animation::TYPE_VALUE: {
-						TrackCacheValue *t = static_cast<TrackCacheValue *>(track);
-
-						Animation::UpdateMode update_mode = a->value_track_get_update_mode(i);
-
-						if (update_mode == Animation::UPDATE_CONTINUOUS || update_mode == Animation::UPDATE_CAPTURE) { //delta == 0 means seek
-
-							Variant value = a->value_track_interpolate(i, time);
-
-							if (value == Variant()) {
-								continue;
-							}
-
-							if (t->process_pass != process_pass) {
-								t->value = value;
-								t->process_pass = process_pass;
-							}
-
-							Variant::interpolate(t->value, value, blend, t->value);
-
-						} else {
-							List<int> indices;
-							a->value_track_get_key_indices(i, time, delta, &indices, pingponged);
-
-							for (int &F : indices) {
-								Variant value = a->track_get_key_value(i, F);
-								t->object->set_indexed(t->subpath, value);
-							}
-						}
-
-					} break;
-					case Animation::TYPE_METHOD: {
-						if (delta == 0) {
-							continue;
-						}
-						TrackCacheMethod *t = static_cast<TrackCacheMethod *>(track);
-
-						List<int> indices;
-
-						a->method_track_get_key_indices(i, time, delta, &indices, pingponged);
-
-						for (int &F : indices) {
-							StringName method = a->method_track_get_name(i, F);
-							Vector<Variant> params = a->method_track_get_params(i, F);
-
-							int s = params.size();
-
-							static_assert(VARIANT_ARG_MAX == 8, "This code needs to be updated if VARIANT_ARG_MAX != 8");
-							ERR_CONTINUE(s > VARIANT_ARG_MAX);
-							if (can_call) {
-								t->object->call_deferred(
-										method,
-										s >= 1 ? params[0] : Variant(),
-										s >= 2 ? params[1] : Variant(),
-										s >= 3 ? params[2] : Variant(),
-										s >= 4 ? params[3] : Variant(),
-										s >= 5 ? params[4] : Variant(),
-										s >= 6 ? params[5] : Variant(),
-										s >= 7 ? params[6] : Variant(),
-										s >= 8 ? params[7] : Variant());
-							}
-						}
-
-					} break;
-					case Animation::TYPE_BEZIER: {
-						TrackCacheBezier *t = static_cast<TrackCacheBezier *>(track);
-
-						real_t bezier = a->bezier_track_interpolate(i, time);
-
-						if (t->process_pass != process_pass) {
-							t->value = bezier;
-							t->process_pass = process_pass;
-						}
-
-						t->value = Math::lerp(t->value, bezier, blend);
-
-					} break;
-					case Animation::TYPE_AUDIO: {
-						TrackCacheAudio *t = static_cast<TrackCacheAudio *>(track);
-
-						if (seeked) {
-							//find whatever should be playing
-							int idx = a->track_find_key(i, time);
-							if (idx < 0) {
-								continue;
-							}
-
-							Ref<AudioStream> stream = a->audio_track_get_key_stream(i, idx);
-							if (!stream.is_valid()) {
-								t->object->call("stop");
-								t->playing = false;
-								playing_caches.erase(t);
-							} else {
-								real_t start_ofs = a->audio_track_get_key_start_offset(i, idx);
-								start_ofs += time - a->track_get_key_time(i, idx);
-								real_t end_ofs = a->audio_track_get_key_end_offset(i, idx);
-								real_t len = stream->get_length();
-
-								if (start_ofs > len - end_ofs) {
-									t->object->call("stop");
-									t->playing = false;
-									playing_caches.erase(t);
-									continue;
-								}
-
-								t->object->call("set_stream", stream);
-								t->object->call("play", start_ofs);
-
-								t->playing = true;
-								playing_caches.insert(t);
-								if (len && end_ofs > 0) { //force an end at a time
-									t->len = len - start_ofs - end_ofs;
-								} else {
-									t->len = 0;
-								}
-
-								t->start = time;
-							}
-
-						} else {
-							//find stuff to play
-							List<int> to_play;
-							a->track_get_key_indices_in_range(i, time, delta, &to_play, pingponged);
-							if (to_play.size()) {
-								int idx = to_play.back()->get();
-
-								Ref<AudioStream> stream = a->audio_track_get_key_stream(i, idx);
-								if (!stream.is_valid()) {
-									t->object->call("stop");
-									t->playing = false;
-									playing_caches.erase(t);
-								} else {
-									real_t start_ofs = a->audio_track_get_key_start_offset(i, idx);
-									real_t end_ofs = a->audio_track_get_key_end_offset(i, idx);
-									real_t len = stream->get_length();
-
-									t->object->call("set_stream", stream);
-									t->object->call("play", start_ofs);
-
-									t->playing = true;
-									playing_caches.insert(t);
-									if (len && end_ofs > 0) { //force an end at a time
-										t->len = len - start_ofs - end_ofs;
-									} else {
-										t->len = 0;
-									}
-
-									t->start = time;
-								}
-							} else if (t->playing) {
-								bool loop = a->get_loop_mode() != Animation::LoopMode::LOOP_NONE;
-
-								bool stop = false;
-
-								if (!loop) {
-									if (delta > 0) {
-										if (time < t->start) {
-											stop = true;
-										}
-									} else if (delta < 0) {
-										if (time > t->start) {
-											stop = true;
-										}
-									}
-								} else if (t->len > 0) {
-									real_t len = t->start > time ? (a->get_length() - t->start) + time : time - t->start;
-
-									if (len > t->len) {
-										stop = true;
-									}
-								}
-
-								if (stop) {
-									//time to stop
-									t->object->call("stop");
-									t->playing = false;
-									playing_caches.erase(t);
-								}
-							}
-						}
-
-						real_t db = Math::linear2db(MAX(blend, 0.00001));
-						if (t->object->has_method("set_unit_db")) {
-							t->object->call("set_unit_db", db);
-						} else {
-							t->object->call("set_volume_db", db);
-						}
-					} break;
-					case Animation::TYPE_ANIMATION: {
-						TrackCacheAnimation *t = static_cast<TrackCacheAnimation *>(track);
-
-						AnimationPlayer *player2 = Object::cast_to<AnimationPlayer>(t->object);
-
-						if (!player2) {
-							continue;
-						}
-
-						if (seeked) {
-							//seek
-							int idx = a->track_find_key(i, time);
-							if (idx < 0) {
-								continue;
-							}
-
-							double pos = a->track_get_key_time(i, idx);
-
-							StringName anim_name = a->animation_track_get_key_animation(i, idx);
-							if (String(anim_name) == "[stop]" || !player2->has_animation(anim_name)) {
-								continue;
-							}
-
-							Ref<Animation> anim = player2->get_animation(anim_name);
-
-							real_t at_anim_pos = 0.0;
-
-							switch (anim->get_loop_mode()) {
-								case Animation::LoopMode::LOOP_NONE: {
-									at_anim_pos = MAX((double)anim->get_length(), time - pos); //seek to end
-								} break;
-								case Animation::LoopMode::LOOP_LINEAR: {
-									at_anim_pos = Math::fposmod(time - pos, (double)anim->get_length()); //seek to loop
-								} break;
-								case Animation::LoopMode::LOOP_PINGPONG: {
-									at_anim_pos = Math::pingpong(time - pos, (double)a->get_length());
-								} break;
-								default:
-									break;
-							}
-
-							if (player2->is_playing() || seeked) {
-								player2->play(anim_name);
-								player2->seek(at_anim_pos);
-								t->playing = true;
-								playing_caches.insert(t);
-							} else {
-								player2->set_assigned_animation(anim_name);
-								player2->seek(at_anim_pos, true);
-							}
-						} else {
-							//find stuff to play
-							List<int> to_play;
-							a->track_get_key_indices_in_range(i, time, delta, &to_play, pingponged);
-							if (to_play.size()) {
-								int idx = to_play.back()->get();
-
-								StringName anim_name = a->animation_track_get_key_animation(i, idx);
-								if (String(anim_name) == "[stop]" || !player2->has_animation(anim_name)) {
-									if (playing_caches.has(t)) {
-										playing_caches.erase(t);
-										player2->stop();
-										t->playing = false;
-									}
-								} else {
-									player2->play(anim_name);
-									t->playing = true;
-									playing_caches.insert(t);
-								}
-							}
-						}
-
-					} break;
-				}
-			}
-		}
-	}
-
-	{
-		// finally, set the tracks
-		const NodePath *K = nullptr;
-		while ((K = track_cache.next(K))) {
-			TrackCache *track = track_cache[*K];
-			if (track->process_pass != process_pass) {
-				continue; //not processed, ignore
-			}
-
-			switch (track->type) {
-				case Animation::TYPE_POSITION_3D: {
-#ifndef _3D_DISABLED
-					TrackCacheTransform *t = static_cast<TrackCacheTransform *>(track);
-
-					if (t->root_motion) {
-						Transform3D xform;
-						xform.origin = t->loc;
-						xform.basis.set_quaternion_scale(t->rot, t->scale);
-
-						root_motion_transform = xform;
-
-					} else if (t->skeleton && t->bone_idx >= 0) {
-						if (t->loc_used) {
-							t->skeleton->set_bone_pose_position(t->bone_idx, t->loc);
-						}
-						if (t->rot_used) {
-							t->skeleton->set_bone_pose_rotation(t->bone_idx, t->rot);
-						}
-						if (t->scale_used) {
-							t->skeleton->set_bone_pose_scale(t->bone_idx, t->scale);
-						}
-
-					} else if (!t->skeleton) {
-						if (t->loc_used) {
-							t->node_3d->set_position(t->loc);
-						}
-						if (t->rot_used) {
-							t->node_3d->set_rotation(t->rot.get_euler());
-						}
-						if (t->scale_used) {
-							t->node_3d->set_scale(t->scale);
-						}
-					}
-#endif // _3D_DISABLED
-				} break;
-				case Animation::TYPE_BLEND_SHAPE: {
-#ifndef _3D_DISABLED
-					TrackCacheBlendShape *t = static_cast<TrackCacheBlendShape *>(track);
-
-					if (t->mesh_3d) {
-						t->mesh_3d->set_blend_shape_value(t->shape_index, t->value);
-					}
-#endif // _3D_DISABLED
-				} break;
-				case Animation::TYPE_VALUE: {
-					TrackCacheValue *t = static_cast<TrackCacheValue *>(track);
-
-					t->object->set_indexed(t->subpath, t->value);
-
-				} break;
-				case Animation::TYPE_BEZIER: {
-					TrackCacheBezier *t = static_cast<TrackCacheBezier *>(track);
-
-					t->object->set_indexed(t->subpath, t->value);
-
-				} break;
-				default: {
-				} //the rest don't matter
-			}
-		}
-	}
+void AnimationTree::set_advance_expression_base_node(const NodePath &p_path) {
+	advance_expression_base_node = p_path;
 }
 
-void AnimationTree::advance(real_t p_time) {
-	_process_graph(p_time);
-}
-
-void AnimationTree::_notification(int p_what) {
-	if (active && p_what == NOTIFICATION_INTERNAL_PHYSICS_PROCESS && process_callback == ANIMATION_PROCESS_PHYSICS) {
-		_process_graph(get_physics_process_delta_time());
-	}
-
-	if (active && p_what == NOTIFICATION_INTERNAL_PROCESS && process_callback == ANIMATION_PROCESS_IDLE) {
-		_process_graph(get_process_delta_time());
-	}
-
-	if (p_what == NOTIFICATION_EXIT_TREE) {
-		_clear_caches();
-		if (last_animation_player.is_valid()) {
-			Object *player = ObjectDB::get_instance(last_animation_player);
-			if (player) {
-				player->disconnect("caches_cleared", callable_mp(this, &AnimationTree::_clear_caches));
-			}
-		}
-	} else if (p_what == NOTIFICATION_ENTER_TREE) {
-		if (last_animation_player.is_valid()) {
-			Object *player = ObjectDB::get_instance(last_animation_player);
-			if (player) {
-				player->connect("caches_cleared", callable_mp(this, &AnimationTree::_clear_caches));
-			}
-		}
-	}
-}
-
-void AnimationTree::set_animation_player(const NodePath &p_player) {
-	animation_player = p_player;
-	update_configuration_warnings();
-}
-
-NodePath AnimationTree::get_animation_player() const {
-	return animation_player;
+NodePath AnimationTree::get_advance_expression_base_node() const {
+	return advance_expression_base_node;
 }
 
 bool AnimationTree::is_state_invalid() const {
-	return !state.valid;
+	return !process_state.valid;
 }
 
-String AnimationTree::get_invalid_state_reason() const {
-	return state.invalid_reasons;
+const AHashMap<StringName, AnimationNode::InvalidInstance> &AnimationTree::get_invalid_instances() const {
+	return process_state.invalid_instances;
 }
 
-uint64_t AnimationTree::get_last_process_pass() const {
-	return process_pass;
-}
-
-TypedArray<String> AnimationTree::get_configuration_warnings() const {
-	TypedArray<String> warnings = Node::get_configuration_warnings();
-
-	if (!root.is_valid()) {
-		warnings.push_back(TTR("No root AnimationNode for the graph is set."));
+PackedStringArray AnimationTree::get_configuration_warnings() const {
+	PackedStringArray warnings = AnimationMixer::get_configuration_warnings();
+	if (root_animation_node.is_null()) {
+		warnings.push_back(RTR("No root AnimationNode for the graph is set."));
 	}
-
-	if (!has_node(animation_player)) {
-		warnings.push_back(TTR("Path to an AnimationPlayer node containing animations is not set."));
-	} else {
-		AnimationPlayer *player = Object::cast_to<AnimationPlayer>(get_node(animation_player));
-
-		if (!player) {
-			warnings.push_back(TTR("Path set for AnimationPlayer does not lead to an AnimationPlayer node."));
-		} else if (!player->has_node(player->get_root())) {
-			warnings.push_back(TTR("The AnimationPlayer root node is not a valid node."));
-		}
-	}
-
 	return warnings;
-}
-
-void AnimationTree::set_root_motion_track(const NodePath &p_track) {
-	root_motion_track = p_track;
-}
-
-NodePath AnimationTree::get_root_motion_track() const {
-	return root_motion_track;
-}
-
-Transform3D AnimationTree::get_root_motion_transform() const {
-	return root_motion_transform;
 }
 
 void AnimationTree::_tree_changed() {
@@ -1673,77 +762,328 @@ void AnimationTree::_tree_changed() {
 		return;
 	}
 
-	call_deferred(SNAME("_update_properties"));
+	callable_mp(this, &AnimationTree::_update_properties).call_deferred();
 	properties_dirty = true;
 }
 
-void AnimationTree::_update_properties_for_node(const String &p_base_path, Ref<AnimationNode> node) {
-	ERR_FAIL_COND(node.is_null());
-	if (!property_parent_map.has(p_base_path)) {
-		property_parent_map[p_base_path] = HashMap<StringName, StringName>();
+void AnimationTree::_node_updated(const ObjectID &p_oid) {
+	// This is for when the animation in AnimationNodeAnimation changes.
+	// or a connection in AnimationNodeBlendTree changes.
+
+	// Ideally, we would only validate relevant instances, but for now, revalidate all.
+	validation_dirty = true;
+}
+
+void AnimationTree::_animation_node_renamed(const ObjectID &p_oid, const String &p_old_name, const String &p_new_name) {
+	//print_line("Node: " + ObjectDB::get_instance(p_oid)->get_class() + " (" + itos(p_oid) + ") renamed: " + p_old_name + " -> " + p_new_name);
+	for (const StringName &pp : instance_paths[p_oid]) {
+		String parent_path = pp;
+		String old_base = parent_path + p_old_name;
+		String new_base = parent_path + p_new_name;
+		//print_line(" - Updating " + pp + ": " + old_base + " -> " + new_base);
+		for (const PropertyInfo &E : properties) {
+			if (E.name.begins_with(old_base)) {
+				StringName old_name = E.name;
+				StringName new_name = E.name.replace_first(old_base, new_base);
+				const Pair<Variant, bool> temp_copy = property_map[old_name];
+				//print_line("   - Property: " + String(old_name) + " -> " + String(new_name));
+				property_map[new_name] = temp_copy;
+				property_map.erase(old_name);
+			}
+		}
 	}
 
-	if (node->get_input_count() && !input_activity_map.has(p_base_path)) {
-		Vector<Activity> activity;
-		for (int i = 0; i < node->get_input_count(); i++) {
-			Activity a;
+	// Update tree second.
+	properties_dirty = true;
+	_update_properties();
+}
+
+void AnimationTree::_animation_node_removed(const ObjectID &p_oid, const StringName &p_node) {
+	for (const StringName &parent_path : instance_paths[p_oid]) {
+		String base_path = String(parent_path) + String(p_node) + "/";
+
+		for (const PropertyInfo &E : properties) {
+			if (E.name.begins_with(base_path)) {
+				property_map.erase(E.name);
+			}
+		}
+	}
+
+	// Update tree second.
+	properties_dirty = true;
+	_update_properties();
+}
+
+void AnimationTree::_update_properties_for_node(const StringName &p_base_path, const Ref<AnimationNode> &p_node) const {
+	ERR_FAIL_COND(p_node.is_null());
+
+	instance_paths[p_node->get_instance_id()].insert(p_base_path);
+
+	const String base_path_str = p_base_path;
+
+	AnimationNodeInstance &instance = instance_map[p_base_path];
+	instance.path = p_base_path;
+	instance.resource = p_node;
+
+#ifdef ENABLE_ACTIVITY_TRACKING
+	if (p_node->get_input_count()) {
+		for (int i = 0; i < p_node->get_input_count(); i++) {
+			AnimationNodeInstance::Activity a;
 			a.activity = 0;
 			a.last_pass = 0;
-			activity.push_back(a);
+			instance.input_activity.push_back(a);
 		}
-		input_activity_map[p_base_path] = activity;
-		input_activity_map_get[String(p_base_path).substr(0, String(p_base_path).length() - 1)] = &input_activity_map[p_base_path];
 	}
+#endif
 
-	List<PropertyInfo> plist;
-	node->get_parameter_list(&plist);
+	LocalVector<PropertyInfo> plist;
+	p_node->get_parameter_list(&plist);
 	for (PropertyInfo &pinfo : plist) {
-		StringName key = pinfo.name;
+		StringName pname = pinfo.name;
+		StringName key = base_path_str + pname;
 
-		if (!property_map.has(p_base_path + key)) {
-			property_map[p_base_path + key] = node->get_parameter_default_value(key);
+		Pair<Variant, bool> *param = property_map.getptr(key);
+		if (!param) {
+			param = &property_map.insert(key, Pair<Variant, bool>())->value;
+			param->first = p_node->get_parameter_default_value(pname);
+			param->second = p_node->is_parameter_read_only(pname);
 		}
 
-		property_parent_map[p_base_path][key] = p_base_path + key;
-
-		pinfo.name = p_base_path + key;
+		pinfo.name = key;
 		properties.push_back(pinfo);
 	}
 
-	List<AnimationNode::ChildNode> children;
-	node->get_child_nodes(&children);
+	LocalVector<AnimationNode::ChildNode> children;
+	p_node->get_child_nodes(&children);
+
+	// These have to be done in two passes, because _update_properties_for_node invalidates the instance reference.
+	for (const AnimationNode::ChildNode &E : children) {
+		ERR_CONTINUE(E.name.is_empty());
+		instance.child_instances[E.name] = nullptr; // Will be set in _update_properties
+	}
 
 	for (const AnimationNode::ChildNode &E : children) {
-		_update_properties_for_node(p_base_path + E.name + "/", E.node);
+		const StringName child_path = base_path_str + E.name + "/";
+		_update_properties_for_node(child_path, E.node);
 	}
 }
 
-void AnimationTree::_update_properties() {
+void AnimationTree::_update_properties() const {
 	if (!properties_dirty) {
 		return;
 	}
 
+	// if properties are dirty, so is the validation state.
+	validation_dirty = true;
 	properties.clear();
-	property_parent_map.clear();
-	input_activity_map.clear();
-	input_activity_map_get.clear();
+	instance_map.clear();
+	instance_paths.clear();
 
-	if (root.is_valid()) {
-		_update_properties_for_node(SceneStringNames::get_singleton()->parameters_base_path, root);
+	if (root_animation_node.is_valid()) {
+		_update_properties_for_node(Animation::PARAMETERS_BASE_PATH, root_animation_node);
+
+		// Now that the properties and instances are stable, we can update them.
+		for (KeyValue<StringName, AnimationNodeInstance> &E : instance_map) {
+			const String &instance_path = E.key;
+			AnimationNodeInstance &instance = E.value;
+
+			// Update children.
+			for (KeyValue<StringName, AnimationNodeInstance *> &kv : instance.child_instances) {
+				const StringName child_path = instance_path + kv.key + "/";
+				kv.value = instance_map.getptr(child_path);
+				CRASH_COND(!kv.value); // Shouldn't ever happen.
+			}
+
+			// Now properties.
+			const Ref<AnimationNode> &node = instance.resource;
+			ERR_FAIL_COND(node.is_null());
+
+			instance.parameter_ptrs_by_slot.resize_initialized(AnimationNodeInstance::SLOT_MAX);
+			LocalVector<PropertyInfo> plist;
+			node->get_parameter_list(&plist);
+			for (const PropertyInfo &pinfo : plist) {
+				StringName pname = pinfo.name;
+
+				Pair<Variant, bool> *pair = property_map.getptr(instance_path + pname);
+				CRASH_COND(!pair); // Shouldn't ever happen.
+
+				instance.property_ptrs[pname] = &pair->first;
+
+				// Some of these get special treatment.
+				instance.maybe_bind_slot_property(pname, &pair->first);
+			}
+		}
 	}
 
 	properties_dirty = false;
 
+	const_cast<AnimationTree *>(this)->notify_property_list_changed();
+}
+
+void AnimationTree::_update_connections() {
+	for (KeyValue<StringName, AnimationNodeInstance> &E : instance_map) {
+		AnimationNodeInstance &parent_instance = E.value;
+
+		const AnimationNodeBlendTree *blend_tree = Object::cast_to<AnimationNodeBlendTree>(parent_instance.resource.ptr());
+
+		if (!blend_tree) {
+			continue;
+		}
+
+		{
+			const LocalVector<StringName> *output_connections = blend_tree->get_node_connection_array(SceneStringName(output));
+			parent_instance.connection_instances.resize(1);
+			AnimationNodeInstance *connected_instance = parent_instance.get_child_instance_by_path_or_null(output_connections->operator[](0));
+			parent_instance.connection_instances[0] = connected_instance;
+		}
+
+		for (const KeyValue<StringName, AnimationNodeInstance *> &kv : parent_instance.child_instances) {
+			AnimationNodeInstance *child_instance = kv.value;
+			const LocalVector<StringName> &child_connections = *blend_tree->get_node_connection_array(kv.key);
+			child_instance->connection_instances.clear();
+			child_instance->connection_instances.resize(child_connections.size());
+			for (uint32_t input = 0; input < child_connections.size(); input++) {
+				const StringName &connected_node_name = child_connections[input];
+				AnimationNodeInstance *connected_instance = parent_instance.get_child_instance_by_path_or_null(connected_node_name);
+				child_instance->connection_instances[input] = connected_instance;
+			}
+		}
+	}
+}
+
+void AnimationTree::_add_validation_error(const StringName &p_path, const String &p_error, int p_input_index) const {
+	AnimationNode::InvalidInstance &invalid_instance = process_state.invalid_instances[p_path];
+
+	if (p_input_index == -1) {
+		if (invalid_instance.errors.find(p_error) == -1) {
+			invalid_instance.errors.push_back(p_error);
+		}
+	} else {
+		for (const AnimationNode::InvalidInstance::InputError &E : invalid_instance.input_errors) {
+			if (E.index == p_input_index) {
+				return;
+			}
+		}
+		invalid_instance.input_errors.push_back({ p_input_index, p_error });
+	}
+}
+
+void AnimationTree::_notification(int p_what) {
+	switch (p_what) {
+		case NOTIFICATION_ENTER_TREE: {
+			_setup_animation_player();
+			if (active) {
+				_set_process(true);
+			}
+		} break;
+	}
+}
+
+void AnimationTree::set_animation_player(const NodePath &p_path) {
+	animation_player = p_path;
+	if (p_path.is_empty()) {
+		set_root_node(NodePath(".."));
+		while (animation_libraries.size()) {
+			remove_animation_library(animation_libraries[0].name);
+		}
+	}
+	emit_signal(SNAME("animation_player_changed")); // Needs to unpin AnimationPlayerEditor.
+	_setup_animation_player();
 	notify_property_list_changed();
 }
 
-bool AnimationTree::_set(const StringName &p_name, const Variant &p_value) {
-	if (properties_dirty) {
-		_update_properties();
+NodePath AnimationTree::get_animation_player() const {
+	return animation_player;
+}
+
+void AnimationTree::_setup_animation_player() {
+	if (!is_inside_tree()) {
+		return;
 	}
 
-	if (property_map.has(p_name)) {
-		property_map[p_name] = p_value;
+	cache_valid = false;
+
+	if (animation_player.is_empty()) {
+		clear_caches();
+		return;
+	}
+
+	// Using AnimationPlayer here is for compatibility. Changing to AnimationMixer needs extra work like error handling.
+	AnimationPlayer *player = Object::cast_to<AnimationPlayer>(get_node_or_null(animation_player));
+	if (player) {
+		if (!player->is_connected(SNAME("caches_cleared"), callable_mp(this, &AnimationTree::_setup_animation_player))) {
+			player->connect(SNAME("caches_cleared"), callable_mp(this, &AnimationTree::_setup_animation_player), CONNECT_DEFERRED);
+		}
+		if (!player->is_connected(SNAME("animation_list_changed"), callable_mp(this, &AnimationTree::_setup_animation_player))) {
+			player->connect(SNAME("animation_list_changed"), callable_mp(this, &AnimationTree::_setup_animation_player), CONNECT_DEFERRED);
+		}
+		Node *root = player->get_node_or_null(player->get_root_node());
+		if (root) {
+			set_root_node(get_path_to(root, true));
+		}
+		while (animation_libraries.size()) {
+			remove_animation_library(animation_libraries[0].name);
+		}
+		LocalVector<StringName> list;
+		player->get_animation_library_list(&list);
+		for (const StringName &E : list) {
+			Ref<AnimationLibrary> lib = player->get_animation_library(E);
+			if (lib.is_valid()) {
+				add_animation_library(E, lib);
+			}
+		}
+	}
+
+	clear_caches();
+}
+
+// `libraries` is a dynamic property, so we can't use `_validate_property` to change it.
+uint32_t AnimationTree::_get_libraries_property_usage() const {
+	if (!animation_player.is_empty()) {
+		return PROPERTY_USAGE_READ_ONLY;
+	}
+	return PROPERTY_USAGE_STORAGE;
+}
+
+void AnimationTree::_validate_property(PropertyInfo &p_property) const {
+	if (!Engine::get_singleton()->is_editor_hint()) {
+		return;
+	}
+
+	if (!animation_player.is_empty()) {
+		if (p_property.name == "root_node") {
+			p_property.usage |= PROPERTY_USAGE_READ_ONLY;
+		}
+	}
+}
+
+bool AnimationTree::_set(const StringName &p_name, const Variant &p_value) {
+#ifndef DISABLE_DEPRECATED
+	String name = p_name;
+	if (name == "process_callback") {
+		set_callback_mode_process(static_cast<AnimationCallbackModeProcess>((int)p_value));
+		return true;
+	}
+#endif // DISABLE_DEPRECATED
+	_update_properties();
+
+	if (Pair<Variant, bool> *property_ptr = property_map.getptr(p_name)) {
+		Pair<Variant, bool> *&pair = property_ptr;
+		if (is_inside_tree() && pair->second) {
+			return false; // Prevent to set property by user.
+		}
+
+		Variant &prop = pair->first;
+		// Only copy variant if needed.
+		if (Animation::needs_type_cast(prop, p_value)) {
+			Variant value = p_value;
+			if (Animation::validate_type_match(prop, value)) {
+				prop = value;
+			}
+		} else {
+			prop = p_value;
+		}
+
 		return true;
 	}
 
@@ -1751,12 +1091,16 @@ bool AnimationTree::_set(const StringName &p_name, const Variant &p_value) {
 }
 
 bool AnimationTree::_get(const StringName &p_name, Variant &r_ret) const {
-	if (properties_dirty) {
-		const_cast<AnimationTree *>(this)->_update_properties();
+#ifndef DISABLE_DEPRECATED
+	if (p_name == "process_callback") {
+		r_ret = get_callback_mode_process();
+		return true;
 	}
+#endif // DISABLE_DEPRECATED
+	_update_properties();
 
-	if (property_map.has(p_name)) {
-		r_ret = property_map[p_name];
+	if (const Pair<Variant, bool> *p = property_map.getptr(p_name)) {
+		r_ret = p->first;
 		return true;
 	}
 
@@ -1764,83 +1108,61 @@ bool AnimationTree::_get(const StringName &p_name, Variant &r_ret) const {
 }
 
 void AnimationTree::_get_property_list(List<PropertyInfo> *p_list) const {
-	if (properties_dirty) {
-		const_cast<AnimationTree *>(this)->_update_properties();
-	}
+	_update_properties();
 
 	for (const PropertyInfo &E : properties) {
 		p_list->push_back(E);
 	}
 }
 
-void AnimationTree::rename_parameter(const String &p_base, const String &p_new_base) {
-	//rename values first
-	for (const PropertyInfo &E : properties) {
-		if (E.name.begins_with(p_base)) {
-			String new_name = E.name.replace_first(p_base, p_new_base);
-			property_map[new_name] = property_map[E.name];
-		}
-	}
-
-	//update tree second
-	properties_dirty = true;
-	_update_properties();
-}
-
+#ifdef ENABLE_ACTIVITY_TRACKING
 real_t AnimationTree::get_connection_activity(const StringName &p_path, int p_connection) const {
-	if (!input_activity_map_get.has(p_path)) {
-		return 0;
-	}
-	const Vector<Activity> *activity = input_activity_map_get[p_path];
-
-	if (!activity || p_connection < 0 || p_connection >= activity->size()) {
+	const AnimationNodeInstance *a = get_node_instance_by_path_or_null(p_path);
+	if (!a) {
 		return 0;
 	}
 
-	if ((*activity)[p_connection].last_pass != process_pass) {
+	const LocalVector<AnimationNodeInstance::Activity> &activity = a->input_activity;
+	if (p_connection < 0 || p_connection >= (int64_t)activity.size() || activity[p_connection].last_pass != process_pass) {
 		return 0;
 	}
 
-	return (*activity)[p_connection].activity;
+	return activity[p_connection].activity;
 }
+#endif
+
+#ifdef TOOLS_ENABLED
+String AnimationTree::get_editor_error_message() const {
+	if (!is_active()) {
+		return TTR("The AnimationTree is inactive.\nActivate it in the inspector to enable playback; check node warnings if activation fails.");
+	} else if (!is_enabled()) {
+		return TTR("The AnimationTree node (or one of its ancestors) has its process mode set to Disabled.\nChange the process mode in the inspector to allow playback.");
+	}
+
+	return "";
+}
+#endif
 
 void AnimationTree::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("set_active", "active"), &AnimationTree::set_active);
-	ClassDB::bind_method(D_METHOD("is_active"), &AnimationTree::is_active);
+	ClassDB::bind_method(D_METHOD("set_tree_root", "animation_node"), &AnimationTree::set_root_animation_node);
+	ClassDB::bind_method(D_METHOD("get_tree_root"), &AnimationTree::get_root_animation_node);
 
-	ClassDB::bind_method(D_METHOD("set_tree_root", "root"), &AnimationTree::set_tree_root);
-	ClassDB::bind_method(D_METHOD("get_tree_root"), &AnimationTree::get_tree_root);
+	ClassDB::bind_method(D_METHOD("set_advance_expression_base_node", "path"), &AnimationTree::set_advance_expression_base_node);
+	ClassDB::bind_method(D_METHOD("get_advance_expression_base_node"), &AnimationTree::get_advance_expression_base_node);
 
-	ClassDB::bind_method(D_METHOD("set_process_callback", "mode"), &AnimationTree::set_process_callback);
-	ClassDB::bind_method(D_METHOD("get_process_callback"), &AnimationTree::get_process_callback);
-
-	ClassDB::bind_method(D_METHOD("set_animation_player", "root"), &AnimationTree::set_animation_player);
+	ClassDB::bind_method(D_METHOD("set_animation_player", "path"), &AnimationTree::set_animation_player);
 	ClassDB::bind_method(D_METHOD("get_animation_player"), &AnimationTree::get_animation_player);
 
-	ClassDB::bind_method(D_METHOD("set_root_motion_track", "path"), &AnimationTree::set_root_motion_track);
-	ClassDB::bind_method(D_METHOD("get_root_motion_track"), &AnimationTree::get_root_motion_track);
-
-	ClassDB::bind_method(D_METHOD("get_root_motion_transform"), &AnimationTree::get_root_motion_transform);
-
-	ClassDB::bind_method(D_METHOD("_update_properties"), &AnimationTree::_update_properties);
-
-	ClassDB::bind_method(D_METHOD("rename_parameter", "old_name", "new_name"), &AnimationTree::rename_parameter);
-
-	ClassDB::bind_method(D_METHOD("advance", "delta"), &AnimationTree::advance);
-
-	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "tree_root", PROPERTY_HINT_RESOURCE_TYPE, "AnimationRootNode"), "set_tree_root", "get_tree_root");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "tree_root", PROPERTY_HINT_RESOURCE_TYPE, AnimationRootNode::get_class_static()), "set_tree_root", "get_tree_root");
+	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "advance_expression_base_node", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Node"), "set_advance_expression_base_node", "get_advance_expression_base_node");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "anim_player", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "AnimationPlayer"), "set_animation_player", "get_animation_player");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "active"), "set_active", "is_active");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "process_callback", PROPERTY_HINT_ENUM, "Physics,Idle,Manual"), "set_process_callback", "get_process_callback");
-	ADD_GROUP("Root Motion", "root_motion_");
-	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "root_motion_track"), "set_root_motion_track", "get_root_motion_track");
 
-	BIND_ENUM_CONSTANT(ANIMATION_PROCESS_PHYSICS);
-	BIND_ENUM_CONSTANT(ANIMATION_PROCESS_IDLE);
-	BIND_ENUM_CONSTANT(ANIMATION_PROCESS_MANUAL);
+	ADD_SIGNAL(MethodInfo("animation_player_changed"));
 }
 
 AnimationTree::AnimationTree() {
+	deterministic = true;
+	callback_mode_discrete = ANIMATION_CALLBACK_MODE_DISCRETE_FORCE_CONTINUOUS;
 }
 
 AnimationTree::~AnimationTree() {

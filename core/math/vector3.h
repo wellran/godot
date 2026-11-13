@@ -1,44 +1,58 @@
-/*************************************************************************/
-/*  vector3.h                                                            */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  vector3.h                                                             */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
-#ifndef VECTOR3_H
-#define VECTOR3_H
+#pragma once
 
+#include "core/error/error_macros.h"
 #include "core/math/math_funcs.h"
-#include "core/math/vector2.h"
-#include "core/math/vector3i.h"
 #include "core/string/ustring.h"
-class Basis;
 
-struct Vector3 {
-	static const int AXIS_COUNT = 3;
+struct Basis;
+struct Vector2;
+struct Vector3i;
+
+struct [[nodiscard]] Vector3 {
+	static const Vector3 LEFT;
+	static const Vector3 RIGHT;
+	static const Vector3 UP;
+	static const Vector3 DOWN;
+	static const Vector3 FORWARD;
+	static const Vector3 BACK;
+	static const Vector3 MODEL_LEFT;
+	static const Vector3 MODEL_RIGHT;
+	static const Vector3 MODEL_TOP;
+	static const Vector3 MODEL_BOTTOM;
+	static const Vector3 MODEL_FRONT;
+	static const Vector3 MODEL_REAR;
+
+	static constexpr int AXIS_COUNT = 3;
 
 	enum Axis {
 		AXIS_X,
@@ -46,37 +60,62 @@ struct Vector3 {
 		AXIS_Z,
 	};
 
-	union {
-		struct {
-			real_t x;
-			real_t y;
-			real_t z;
-		};
+	real_t x = 0.0f;
+	real_t y = 0.0f;
+	real_t z = 0.0f;
 
-		real_t coord[3] = { 0 };
-	};
+	constexpr real_t &operator[](int p_axis) {
+		// The pointer math below assumes that the elements are placed back-to-back, like an array.
+		// This is always true in practice, but technically not guaranteed; we safety-check it here.
+		static_assert(offsetof(Vector3, x) == 0 * sizeof(real_t));
+		static_assert(offsetof(Vector3, y) == 1 * sizeof(real_t));
+		static_assert(offsetof(Vector3, z) == 2 * sizeof(real_t));
+		static_assert(sizeof(Vector3) == 3 * sizeof(real_t));
 
-	_FORCE_INLINE_ const real_t &operator[](const int p_axis) const {
-		return coord[p_axis];
+		DEV_ASSERT((unsigned int)p_axis < 3);
+		return (&x)[p_axis];
+	}
+	constexpr const real_t &operator[](int p_axis) const {
+		DEV_ASSERT((unsigned int)p_axis < 3);
+		return (&x)[p_axis];
 	}
 
-	_FORCE_INLINE_ real_t &operator[](const int p_axis) {
-		return coord[p_axis];
+	_FORCE_INLINE_ Vector3::Axis min_axis_index() const {
+		return x < y ? (x < z ? Vector3::AXIS_X : Vector3::AXIS_Z) : (y < z ? Vector3::AXIS_Y : Vector3::AXIS_Z);
 	}
 
-	void set_axis(const int p_axis, const real_t p_value);
-	real_t get_axis(const int p_axis) const;
-
-	_FORCE_INLINE_ void set_all(const real_t p_value) {
-		x = y = z = p_value;
+	_FORCE_INLINE_ Vector3::Axis max_axis_index() const {
+		return x < y ? (y < z ? Vector3::AXIS_Z : Vector3::AXIS_Y) : (x < z ? Vector3::AXIS_Z : Vector3::AXIS_X);
 	}
 
-	_FORCE_INLINE_ int min_axis() const {
-		return x < y ? (x < z ? 0 : 2) : (y < z ? 1 : 2);
+	Vector3 min(const Vector3 &p_vector3) const {
+		return Vector3(MIN(x, p_vector3.x), MIN(y, p_vector3.y), MIN(z, p_vector3.z));
 	}
 
-	_FORCE_INLINE_ int max_axis() const {
-		return x < y ? (y < z ? 2 : 1) : (x < z ? 2 : 0);
+	Vector3 minf(real_t p_scalar) const {
+		return Vector3(MIN(x, p_scalar), MIN(y, p_scalar), MIN(z, p_scalar));
+	}
+
+	Vector3 max(const Vector3 &p_vector3) const {
+		return Vector3(MAX(x, p_vector3.x), MAX(y, p_vector3.y), MAX(z, p_vector3.z));
+	}
+
+	Vector3 maxf(real_t p_scalar) const {
+		return Vector3(MAX(x, p_scalar), MAX(y, p_scalar), MAX(z, p_scalar));
+	}
+
+	Vector3 clamp(const Vector3 &p_min, const Vector3 &p_max) const {
+		return Vector3(
+				CLAMP(x, p_min.x, p_max.x),
+				CLAMP(y, p_min.y, p_max.y),
+				CLAMP(z, p_min.z, p_max.z));
+	}
+
+	Vector3 clampf(real_t p_min, real_t p_max) const {
+		return Vector3(
+				CLAMP(x, p_min, p_max),
+				CLAMP(y, p_min, p_max),
+				CLAMP(z, p_min, p_max));
 	}
 
 	_FORCE_INLINE_ real_t length() const;
@@ -86,63 +125,49 @@ struct Vector3 {
 	_FORCE_INLINE_ Vector3 normalized() const;
 	_FORCE_INLINE_ bool is_normalized() const;
 	_FORCE_INLINE_ Vector3 inverse() const;
-	Vector3 limit_length(const real_t p_len = 1.0) const;
+	Vector3 limit_length(real_t p_len = 1.0) const;
 
 	_FORCE_INLINE_ void zero();
 
-	void snap(const Vector3 p_val);
-	Vector3 snapped(const Vector3 p_val) const;
+	void snap(const Vector3 &p_step);
+	void snapf(real_t p_step);
+	Vector3 snapped(const Vector3 &p_step) const;
+	Vector3 snappedf(real_t p_step) const;
 
-	void rotate(const Vector3 &p_axis, const real_t p_phi);
-	Vector3 rotated(const Vector3 &p_axis, const real_t p_phi) const;
+	void rotate(const Vector3 &p_axis, real_t p_angle);
+	Vector3 rotated(const Vector3 &p_axis, real_t p_angle) const;
 
 	/* Static Methods between 2 vector3s */
 
-	_FORCE_INLINE_ Vector3 lerp(const Vector3 &p_to, const real_t p_weight) const;
-	_FORCE_INLINE_ Vector3 slerp(const Vector3 &p_to, const real_t p_weight) const;
-	Vector3 cubic_interpolate(const Vector3 &p_b, const Vector3 &p_pre_a, const Vector3 &p_post_b, const real_t p_weight) const;
-	Vector3 move_toward(const Vector3 &p_to, const real_t p_delta) const;
+	_FORCE_INLINE_ Vector3 lerp(const Vector3 &p_to, real_t p_weight) const;
+	_FORCE_INLINE_ Vector3 slerp(const Vector3 &p_to, real_t p_weight) const;
+	_FORCE_INLINE_ Vector3 cubic_interpolate(const Vector3 &p_b, const Vector3 &p_pre_a, const Vector3 &p_post_b, real_t p_weight) const;
+	_FORCE_INLINE_ Vector3 cubic_interpolate_in_time(const Vector3 &p_b, const Vector3 &p_pre_a, const Vector3 &p_post_b, real_t p_weight, real_t p_b_t, real_t p_pre_a_t, real_t p_post_b_t) const;
+	_FORCE_INLINE_ Vector3 bezier_interpolate(const Vector3 &p_control_1, const Vector3 &p_control_2, const Vector3 &p_end, real_t p_t) const;
+	_FORCE_INLINE_ Vector3 bezier_derivative(const Vector3 &p_control_1, const Vector3 &p_control_2, const Vector3 &p_end, real_t p_t) const;
 
-	_FORCE_INLINE_ Vector2 octahedron_encode() const {
-		Vector3 n = *this;
-		n /= Math::abs(n.x) + Math::abs(n.y) + Math::abs(n.z);
-		Vector2 o;
-		if (n.z >= 0.0) {
-			o.x = n.x;
-			o.y = n.y;
-		} else {
-			o.x = (1.0 - Math::abs(n.y)) * (n.x >= 0.0 ? 1.0 : -1.0);
-			o.y = (1.0 - Math::abs(n.x)) * (n.y >= 0.0 ? 1.0 : -1.0);
-		}
-		o.x = o.x * 0.5 + 0.5;
-		o.y = o.y * 0.5 + 0.5;
-		return o;
-	}
+	Vector3 move_toward(const Vector3 &p_to, real_t p_delta) const;
 
-	static _FORCE_INLINE_ Vector3 octahedron_decode(const Vector2 &p_oct) {
-		Vector2 f(p_oct.x * 2.0 - 1.0, p_oct.y * 2.0 - 1.0);
-		Vector3 n(f.x, f.y, 1.0f - Math::abs(f.x) - Math::abs(f.y));
-		float t = CLAMP(-n.z, 0.0, 1.0);
-		n.x += n.x >= 0 ? -t : t;
-		n.y += n.y >= 0 ? -t : t;
-		return n.normalized();
-	}
+	Vector2 octahedron_encode() const;
+	static Vector3 octahedron_decode(const Vector2 &p_oct);
+	Vector2 octahedron_tangent_encode(float p_sign) const;
+	static Vector3 octahedron_tangent_decode(const Vector2 &p_oct, float *r_sign);
 
-	_FORCE_INLINE_ Vector3 cross(const Vector3 &p_b) const;
-	_FORCE_INLINE_ real_t dot(const Vector3 &p_b) const;
-	Basis outer(const Vector3 &p_b) const;
+	_FORCE_INLINE_ Vector3 cross(const Vector3 &p_with) const;
+	_FORCE_INLINE_ real_t dot(const Vector3 &p_with) const;
+	Basis outer(const Vector3 &p_with) const;
+	_FORCE_INLINE_ Vector3 get_any_perpendicular() const;
 
 	_FORCE_INLINE_ Vector3 abs() const;
 	_FORCE_INLINE_ Vector3 floor() const;
 	_FORCE_INLINE_ Vector3 sign() const;
 	_FORCE_INLINE_ Vector3 ceil() const;
 	_FORCE_INLINE_ Vector3 round() const;
-	Vector3 clamp(const Vector3 &p_min, const Vector3 &p_max) const;
 
 	_FORCE_INLINE_ real_t distance_to(const Vector3 &p_to) const;
 	_FORCE_INLINE_ real_t distance_squared_to(const Vector3 &p_to) const;
 
-	_FORCE_INLINE_ Vector3 posmod(const real_t p_mod) const;
+	_FORCE_INLINE_ Vector3 posmod(real_t p_mod) const;
 	_FORCE_INLINE_ Vector3 posmodv(const Vector3 &p_modv) const;
 	_FORCE_INLINE_ Vector3 project(const Vector3 &p_to) const;
 
@@ -155,61 +180,75 @@ struct Vector3 {
 	_FORCE_INLINE_ Vector3 reflect(const Vector3 &p_normal) const;
 
 	bool is_equal_approx(const Vector3 &p_v) const;
+	bool is_same(const Vector3 &p_v) const;
+	bool is_zero_approx() const;
+	bool is_finite() const;
 
 	/* Operators */
 
-	_FORCE_INLINE_ Vector3 &operator+=(const Vector3 &p_v);
-	_FORCE_INLINE_ Vector3 operator+(const Vector3 &p_v) const;
-	_FORCE_INLINE_ Vector3 &operator-=(const Vector3 &p_v);
-	_FORCE_INLINE_ Vector3 operator-(const Vector3 &p_v) const;
-	_FORCE_INLINE_ Vector3 &operator*=(const Vector3 &p_v);
-	_FORCE_INLINE_ Vector3 operator*(const Vector3 &p_v) const;
-	_FORCE_INLINE_ Vector3 &operator/=(const Vector3 &p_v);
-	_FORCE_INLINE_ Vector3 operator/(const Vector3 &p_v) const;
+	constexpr Vector3 &operator+=(const Vector3 &p_v);
+	constexpr Vector3 operator+(const Vector3 &p_v) const;
+	constexpr Vector3 &operator-=(const Vector3 &p_v);
+	constexpr Vector3 operator-(const Vector3 &p_v) const;
+	constexpr Vector3 &operator*=(const Vector3 &p_v);
+	constexpr Vector3 operator*(const Vector3 &p_v) const;
+	constexpr Vector3 &operator/=(const Vector3 &p_v);
+	constexpr Vector3 operator/(const Vector3 &p_v) const;
 
-	_FORCE_INLINE_ Vector3 &operator*=(const real_t p_scalar);
-	_FORCE_INLINE_ Vector3 operator*(const real_t p_scalar) const;
-	_FORCE_INLINE_ Vector3 &operator/=(const real_t p_scalar);
-	_FORCE_INLINE_ Vector3 operator/(const real_t p_scalar) const;
+	constexpr Vector3 &operator*=(real_t p_scalar);
+	constexpr Vector3 operator*(real_t p_scalar) const;
+	constexpr Vector3 &operator/=(real_t p_scalar);
+	constexpr Vector3 operator/(real_t p_scalar) const;
 
-	_FORCE_INLINE_ Vector3 operator-() const;
+	constexpr Vector3 operator-() const;
 
-	_FORCE_INLINE_ bool operator==(const Vector3 &p_v) const;
-	_FORCE_INLINE_ bool operator!=(const Vector3 &p_v) const;
-	_FORCE_INLINE_ bool operator<(const Vector3 &p_v) const;
-	_FORCE_INLINE_ bool operator<=(const Vector3 &p_v) const;
-	_FORCE_INLINE_ bool operator>(const Vector3 &p_v) const;
-	_FORCE_INLINE_ bool operator>=(const Vector3 &p_v) const;
+	constexpr bool operator==(const Vector3 &p_v) const;
+	constexpr bool operator!=(const Vector3 &p_v) const;
+	constexpr bool operator<(const Vector3 &p_v) const;
+	constexpr bool operator<=(const Vector3 &p_v) const;
+	constexpr bool operator>(const Vector3 &p_v) const;
+	constexpr bool operator>=(const Vector3 &p_v) const;
 
-	operator String() const;
-	_FORCE_INLINE_ operator Vector3i() const {
-		return Vector3i(x, y, z);
+	explicit operator String() const;
+	operator Vector3i() const;
+
+	uint32_t hash() const {
+		uint32_t h = hash_murmur3_one_real(x);
+		h = hash_murmur3_one_real(y, h);
+		h = hash_murmur3_one_real(z, h);
+		return hash_fmix32(h);
 	}
 
-	_FORCE_INLINE_ Vector3() {}
-	_FORCE_INLINE_ Vector3(const Vector3i &p_ivec) {
-		x = p_ivec.x;
-		y = p_ivec.y;
-		z = p_ivec.z;
-	}
-	_FORCE_INLINE_ Vector3(const real_t p_x, const real_t p_y, const real_t p_z) {
-		x = p_x;
-		y = p_y;
-		z = p_z;
-	}
+	constexpr Vector3() :
+			x(0), y(0), z(0) {}
+	constexpr Vector3(real_t p_x, real_t p_y, real_t p_z) :
+			x(p_x), y(p_y), z(p_z) {}
 };
 
-Vector3 Vector3::cross(const Vector3 &p_b) const {
+inline constexpr Vector3 Vector3::LEFT = { -1, 0, 0 };
+inline constexpr Vector3 Vector3::RIGHT = { 1, 0, 0 };
+inline constexpr Vector3 Vector3::UP = { 0, 1, 0 };
+inline constexpr Vector3 Vector3::DOWN = { 0, -1, 0 };
+inline constexpr Vector3 Vector3::FORWARD = { 0, 0, -1 };
+inline constexpr Vector3 Vector3::BACK = { 0, 0, 1 };
+inline constexpr Vector3 Vector3::MODEL_LEFT = { 1, 0, 0 };
+inline constexpr Vector3 Vector3::MODEL_RIGHT = { -1, 0, 0 };
+inline constexpr Vector3 Vector3::MODEL_TOP = { 0, 1, 0 };
+inline constexpr Vector3 Vector3::MODEL_BOTTOM = { 0, -1, 0 };
+inline constexpr Vector3 Vector3::MODEL_FRONT = { 0, 0, 1 };
+inline constexpr Vector3 Vector3::MODEL_REAR = { 0, 0, -1 };
+
+Vector3 Vector3::cross(const Vector3 &p_with) const {
 	Vector3 ret(
-			(y * p_b.z) - (z * p_b.y),
-			(z * p_b.x) - (x * p_b.z),
-			(x * p_b.y) - (y * p_b.x));
+			(y * p_with.z) - (z * p_with.y),
+			(z * p_with.x) - (x * p_with.z),
+			(x * p_with.y) - (y * p_with.x));
 
 	return ret;
 }
 
-real_t Vector3::dot(const Vector3 &p_b) const {
-	return x * p_b.x + y * p_b.y + z * p_b.z;
+real_t Vector3::dot(const Vector3 &p_with) const {
+	return x * p_with.x + y * p_with.y + z * p_with.z;
 }
 
 Vector3 Vector3::abs() const {
@@ -232,16 +271,66 @@ Vector3 Vector3::round() const {
 	return Vector3(Math::round(x), Math::round(y), Math::round(z));
 }
 
-Vector3 Vector3::lerp(const Vector3 &p_to, const real_t p_weight) const {
-	return Vector3(
-			x + (p_weight * (p_to.x - x)),
-			y + (p_weight * (p_to.y - y)),
-			z + (p_weight * (p_to.z - z)));
+Vector3 Vector3::lerp(const Vector3 &p_to, real_t p_weight) const {
+	Vector3 res = *this;
+	res.x = Math::lerp(res.x, p_to.x, p_weight);
+	res.y = Math::lerp(res.y, p_to.y, p_weight);
+	res.z = Math::lerp(res.z, p_to.z, p_weight);
+	return res;
 }
 
-Vector3 Vector3::slerp(const Vector3 &p_to, const real_t p_weight) const {
-	real_t theta = angle_to(p_to);
-	return rotated(cross(p_to).normalized(), theta * p_weight);
+Vector3 Vector3::slerp(const Vector3 &p_to, real_t p_weight) const {
+	// This method seems more complicated than it really is, since we write out
+	// the internals of some methods for efficiency (mainly, checking length).
+	real_t start_length_sq = length_squared();
+	real_t end_length_sq = p_to.length_squared();
+	if (unlikely(start_length_sq == 0.0f || end_length_sq == 0.0f)) {
+		// Zero length vectors have no angle, so the best we can do is either lerp or throw an error.
+		return lerp(p_to, p_weight);
+	}
+	Vector3 axis = cross(p_to);
+	real_t axis_length_sq = axis.length_squared();
+	if (unlikely(axis_length_sq == 0.0f)) {
+		// Colinear vectors have no rotation axis or angle between them, so the best we can do is lerp.
+		return lerp(p_to, p_weight);
+	}
+	axis /= Math::sqrt(axis_length_sq);
+	real_t start_length = Math::sqrt(start_length_sq);
+	real_t result_length = Math::lerp(start_length, Math::sqrt(end_length_sq), p_weight);
+	real_t angle = angle_to(p_to);
+	return rotated(axis, angle * p_weight) * (result_length / start_length);
+}
+
+Vector3 Vector3::cubic_interpolate(const Vector3 &p_b, const Vector3 &p_pre_a, const Vector3 &p_post_b, real_t p_weight) const {
+	Vector3 res = *this;
+	res.x = Math::cubic_interpolate(res.x, p_b.x, p_pre_a.x, p_post_b.x, p_weight);
+	res.y = Math::cubic_interpolate(res.y, p_b.y, p_pre_a.y, p_post_b.y, p_weight);
+	res.z = Math::cubic_interpolate(res.z, p_b.z, p_pre_a.z, p_post_b.z, p_weight);
+	return res;
+}
+
+Vector3 Vector3::cubic_interpolate_in_time(const Vector3 &p_b, const Vector3 &p_pre_a, const Vector3 &p_post_b, real_t p_weight, real_t p_b_t, real_t p_pre_a_t, real_t p_post_b_t) const {
+	Vector3 res = *this;
+	res.x = Math::cubic_interpolate_in_time(res.x, p_b.x, p_pre_a.x, p_post_b.x, p_weight, p_b_t, p_pre_a_t, p_post_b_t);
+	res.y = Math::cubic_interpolate_in_time(res.y, p_b.y, p_pre_a.y, p_post_b.y, p_weight, p_b_t, p_pre_a_t, p_post_b_t);
+	res.z = Math::cubic_interpolate_in_time(res.z, p_b.z, p_pre_a.z, p_post_b.z, p_weight, p_b_t, p_pre_a_t, p_post_b_t);
+	return res;
+}
+
+Vector3 Vector3::bezier_interpolate(const Vector3 &p_control_1, const Vector3 &p_control_2, const Vector3 &p_end, real_t p_t) const {
+	Vector3 res = *this;
+	res.x = Math::bezier_interpolate(res.x, p_control_1.x, p_control_2.x, p_end.x, p_t);
+	res.y = Math::bezier_interpolate(res.y, p_control_1.y, p_control_2.y, p_end.y, p_t);
+	res.z = Math::bezier_interpolate(res.z, p_control_1.z, p_control_2.z, p_end.z, p_t);
+	return res;
+}
+
+Vector3 Vector3::bezier_derivative(const Vector3 &p_control_1, const Vector3 &p_control_2, const Vector3 &p_end, real_t p_t) const {
+	Vector3 res = *this;
+	res.x = Math::bezier_derivative(res.x, p_control_1.x, p_control_2.x, p_end.x, p_t);
+	res.y = Math::bezier_derivative(res.y, p_control_1.y, p_control_2.y, p_end.y, p_t);
+	res.z = Math::bezier_derivative(res.z, p_control_1.z, p_control_2.z, p_end.z, p_t);
+	return res;
 }
 
 real_t Vector3::distance_to(const Vector3 &p_to) const {
@@ -252,7 +341,7 @@ real_t Vector3::distance_squared_to(const Vector3 &p_to) const {
 	return (p_to - *this).length_squared();
 }
 
-Vector3 Vector3::posmod(const real_t p_mod) const {
+Vector3 Vector3::posmod(real_t p_mod) const {
 	return Vector3(Math::fposmod(x, p_mod), Math::fposmod(y, p_mod), Math::fposmod(z, p_mod));
 }
 
@@ -281,103 +370,116 @@ Vector3 Vector3::direction_to(const Vector3 &p_to) const {
 	return ret;
 }
 
+Vector3 Vector3::get_any_perpendicular() const {
+	// Return the any perpendicular vector by cross product with the Vector3.RIGHT or Vector3.UP,
+	// whichever has the greater angle to the current vector with the sign of each element positive.
+	// The only essence is "to avoid being parallel to the current vector", and there is no mathematical basis for using Vector3.RIGHT and Vector3.UP,
+	// since it could be a different vector depending on the prior branching code Math::abs(x) <= Math::abs(y) && Math::abs(x) <= Math::abs(z).
+	// However, it would be reasonable to use any of the axes of the basis, as it is simpler to calculate.
+	ERR_FAIL_COND_V_MSG(is_zero_approx(), Vector3(0, 0, 0), "The Vector3 must not be zero.");
+	return cross((Math::abs(x) <= Math::abs(y) && Math::abs(x) <= Math::abs(z)) ? Vector3::RIGHT : Vector3::UP).normalized();
+}
+
 /* Operators */
 
-Vector3 &Vector3::operator+=(const Vector3 &p_v) {
+constexpr Vector3 &Vector3::operator+=(const Vector3 &p_v) {
 	x += p_v.x;
 	y += p_v.y;
 	z += p_v.z;
 	return *this;
 }
 
-Vector3 Vector3::operator+(const Vector3 &p_v) const {
+constexpr Vector3 Vector3::operator+(const Vector3 &p_v) const {
 	return Vector3(x + p_v.x, y + p_v.y, z + p_v.z);
 }
 
-Vector3 &Vector3::operator-=(const Vector3 &p_v) {
+constexpr Vector3 &Vector3::operator-=(const Vector3 &p_v) {
 	x -= p_v.x;
 	y -= p_v.y;
 	z -= p_v.z;
 	return *this;
 }
 
-Vector3 Vector3::operator-(const Vector3 &p_v) const {
+constexpr Vector3 Vector3::operator-(const Vector3 &p_v) const {
 	return Vector3(x - p_v.x, y - p_v.y, z - p_v.z);
 }
 
-Vector3 &Vector3::operator*=(const Vector3 &p_v) {
+constexpr Vector3 &Vector3::operator*=(const Vector3 &p_v) {
 	x *= p_v.x;
 	y *= p_v.y;
 	z *= p_v.z;
 	return *this;
 }
 
-Vector3 Vector3::operator*(const Vector3 &p_v) const {
+constexpr Vector3 Vector3::operator*(const Vector3 &p_v) const {
 	return Vector3(x * p_v.x, y * p_v.y, z * p_v.z);
 }
 
-Vector3 &Vector3::operator/=(const Vector3 &p_v) {
+constexpr Vector3 &Vector3::operator/=(const Vector3 &p_v) {
 	x /= p_v.x;
 	y /= p_v.y;
 	z /= p_v.z;
 	return *this;
 }
 
-Vector3 Vector3::operator/(const Vector3 &p_v) const {
+constexpr Vector3 Vector3::operator/(const Vector3 &p_v) const {
 	return Vector3(x / p_v.x, y / p_v.y, z / p_v.z);
 }
 
-Vector3 &Vector3::operator*=(const real_t p_scalar) {
+constexpr Vector3 &Vector3::operator*=(real_t p_scalar) {
 	x *= p_scalar;
 	y *= p_scalar;
 	z *= p_scalar;
 	return *this;
 }
 
-_FORCE_INLINE_ Vector3 operator*(const float p_scalar, const Vector3 &p_vec) {
+// Multiplication operators required to workaround issues with LLVM using implicit conversion
+// to Vector3i instead for integers where it should not.
+
+constexpr Vector3 operator*(float p_scalar, const Vector3 &p_vec) {
 	return p_vec * p_scalar;
 }
 
-_FORCE_INLINE_ Vector3 operator*(const double p_scalar, const Vector3 &p_vec) {
+constexpr Vector3 operator*(double p_scalar, const Vector3 &p_vec) {
 	return p_vec * p_scalar;
 }
 
-_FORCE_INLINE_ Vector3 operator*(const int32_t p_scalar, const Vector3 &p_vec) {
+constexpr Vector3 operator*(int32_t p_scalar, const Vector3 &p_vec) {
 	return p_vec * p_scalar;
 }
 
-_FORCE_INLINE_ Vector3 operator*(const int64_t p_scalar, const Vector3 &p_vec) {
+constexpr Vector3 operator*(int64_t p_scalar, const Vector3 &p_vec) {
 	return p_vec * p_scalar;
 }
 
-Vector3 Vector3::operator*(const real_t p_scalar) const {
+constexpr Vector3 Vector3::operator*(real_t p_scalar) const {
 	return Vector3(x * p_scalar, y * p_scalar, z * p_scalar);
 }
 
-Vector3 &Vector3::operator/=(const real_t p_scalar) {
+constexpr Vector3 &Vector3::operator/=(real_t p_scalar) {
 	x /= p_scalar;
 	y /= p_scalar;
 	z /= p_scalar;
 	return *this;
 }
 
-Vector3 Vector3::operator/(const real_t p_scalar) const {
+constexpr Vector3 Vector3::operator/(real_t p_scalar) const {
 	return Vector3(x / p_scalar, y / p_scalar, z / p_scalar);
 }
 
-Vector3 Vector3::operator-() const {
+constexpr Vector3 Vector3::operator-() const {
 	return Vector3(-x, -y, -z);
 }
 
-bool Vector3::operator==(const Vector3 &p_v) const {
+constexpr bool Vector3::operator==(const Vector3 &p_v) const {
 	return x == p_v.x && y == p_v.y && z == p_v.z;
 }
 
-bool Vector3::operator!=(const Vector3 &p_v) const {
+constexpr bool Vector3::operator!=(const Vector3 &p_v) const {
 	return x != p_v.x || y != p_v.y || z != p_v.z;
 }
 
-bool Vector3::operator<(const Vector3 &p_v) const {
+constexpr bool Vector3::operator<(const Vector3 &p_v) const {
 	if (x == p_v.x) {
 		if (y == p_v.y) {
 			return z < p_v.z;
@@ -387,7 +489,7 @@ bool Vector3::operator<(const Vector3 &p_v) const {
 	return x < p_v.x;
 }
 
-bool Vector3::operator>(const Vector3 &p_v) const {
+constexpr bool Vector3::operator>(const Vector3 &p_v) const {
 	if (x == p_v.x) {
 		if (y == p_v.y) {
 			return z > p_v.z;
@@ -397,7 +499,7 @@ bool Vector3::operator>(const Vector3 &p_v) const {
 	return x > p_v.x;
 }
 
-bool Vector3::operator<=(const Vector3 &p_v) const {
+constexpr bool Vector3::operator<=(const Vector3 &p_v) const {
 	if (x == p_v.x) {
 		if (y == p_v.y) {
 			return z <= p_v.z;
@@ -407,7 +509,7 @@ bool Vector3::operator<=(const Vector3 &p_v) const {
 	return x < p_v.x;
 }
 
-bool Vector3::operator>=(const Vector3 &p_v) const {
+constexpr bool Vector3::operator>=(const Vector3 &p_v) const {
 	if (x == p_v.x) {
 		if (y == p_v.y) {
 			return z >= p_v.z;
@@ -442,14 +544,22 @@ real_t Vector3::length_squared() const {
 }
 
 void Vector3::normalize() {
-	real_t lengthsq = length_squared();
-	if (lengthsq == 0) {
-		x = y = z = 0;
+	if (!is_finite()) {
+#ifdef MATH_CHECKS
+		WARN_PRINT("Vector3 cannot be normalized, the elements must be finite. Making (0, 0, 0) as a fallback.");
+#endif // MATH_CHECKS
+		zero();
+		return;
+	}
+
+	real_t l = length_squared();
+	if (l == 0) {
+		zero();
 	} else {
-		real_t length = Math::sqrt(lengthsq);
-		x /= length;
-		y /= length;
-		z /= length;
+		l = Math::sqrt(l);
+		x /= l;
+		y /= l;
+		z /= l;
 	}
 }
 
@@ -465,7 +575,7 @@ bool Vector3::is_normalized() const {
 }
 
 Vector3 Vector3::inverse() const {
-	return Vector3(1.0 / x, 1.0 / y, 1.0 / z);
+	return Vector3(1.0f / x, 1.0f / y, 1.0f / z);
 }
 
 void Vector3::zero() {
@@ -475,9 +585,9 @@ void Vector3::zero() {
 // slide returns the component of the vector along the given plane, specified by its normal vector.
 Vector3 Vector3::slide(const Vector3 &p_normal) const {
 #ifdef MATH_CHECKS
-	ERR_FAIL_COND_V_MSG(!p_normal.is_normalized(), Vector3(), "The normal Vector3 must be normalized.");
+	ERR_FAIL_COND_V_MSG(!p_normal.is_normalized(), Vector3(), "The normal Vector3 " + p_normal.operator String() + " must be normalized.");
 #endif
-	return *this - p_normal * this->dot(p_normal);
+	return *this - p_normal * dot(p_normal);
 }
 
 Vector3 Vector3::bounce(const Vector3 &p_normal) const {
@@ -486,9 +596,10 @@ Vector3 Vector3::bounce(const Vector3 &p_normal) const {
 
 Vector3 Vector3::reflect(const Vector3 &p_normal) const {
 #ifdef MATH_CHECKS
-	ERR_FAIL_COND_V_MSG(!p_normal.is_normalized(), Vector3(), "The normal Vector3 must be normalized.");
+	ERR_FAIL_COND_V_MSG(!p_normal.is_normalized(), Vector3(), "The normal Vector3 " + p_normal.operator String() + " must be normalized.");
 #endif
-	return 2.0 * p_normal * this->dot(p_normal) - *this;
+	return 2.0f * p_normal * dot(p_normal) - *this;
 }
 
-#endif // VECTOR3_H
+template <>
+struct is_zero_constructible<Vector3> : std::true_type {};

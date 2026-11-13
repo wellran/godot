@@ -79,6 +79,13 @@ public:
      */
     int32_t  removeDuplicateStates();
 
+    /**
+     * Minimizes the number of slots used by the lookaheads.
+     * This must be called before `removeDuplicateStates`: by merging lookaheads, it removes
+     * distinctions between states that would be preserved by `removeDuplicateStates`.
+     */
+    void minimizeLookaheads();
+
     /** Build the safe reverse table from the already-constructed forward table. */
     void     buildSafeReverseTable(UErrorCode &status);
 
@@ -105,6 +112,7 @@ private:
     void     flagLookAheadStates();
     void     flagTaggedStates();
     void     mergeRuleStatusVals();
+    void     minimizeStates();
 
     /**
      * Merge redundant state table columns, eliminating character classes with identical behavior.
@@ -113,23 +121,6 @@ private:
     int32_t  mergeColumns();
 
     void     addRuleRootNodes(UVector *dest, RBBINode *node);
-
-    /**
-     *  Find duplicate (redundant) states, beginning at the specified pair,
-     *  within this state table. This is an iterator-like function, used to
-     *  identify states (state table rows) that can be eliminated.
-     *  @param states in/out parameter, specifies where to start looking for duplicates,
-     *                and returns the first pair of duplicates found, if any.
-     *  @return true if duplicate states were found, false otherwise.
-     */
-    bool findDuplicateState(IntPair *states);
-
-    /** Remove a duplicate state.
-     * @param duplStates The duplicate states. The first is kept, the second is removed.
-     *                   All references to the second in the state table are retargeted
-     *                   to the first.
-     */
-    void removeState(IntPair duplStates);
 
     /** Find the next duplicate state in the safe reverse table. An iterator function.
      *  @param states in/out parameter, specifies where to start looking for duplicates,
@@ -156,7 +147,7 @@ private:
 public:
 #ifdef RBBI_DEBUG
     void     printSet(UVector *s);
-    void     printPosSets(RBBINode *n /* = NULL*/);
+    void     printPosSets(RBBINode *n /* = nullptr */);
     void     printStates();
     void     printRuleStatusTable();
     void     printReverseTable();
@@ -219,8 +210,8 @@ public:
     ~RBBIStateDescriptor();
 
 private:
-    RBBIStateDescriptor(const RBBIStateDescriptor &other); // forbid copying of this class
-    RBBIStateDescriptor &operator=(const RBBIStateDescriptor &other); // forbid copying of this class
+    RBBIStateDescriptor(const RBBIStateDescriptor &other) = delete; // forbid copying of this class
+    RBBIStateDescriptor &operator=(const RBBIStateDescriptor &other) = delete; // forbid copying of this class
 };
 
 

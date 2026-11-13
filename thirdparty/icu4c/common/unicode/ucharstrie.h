@@ -66,8 +66,8 @@ public:
      * @param trieUChars The char16_t array that contains the serialized trie.
      * @stable ICU 4.8
      */
-    UCharsTrie(ConstChar16Ptr trieUChars)
-            : ownedArray_(NULL), uchars_(trieUChars),
+    UCharsTrie(ConstChar16Ptr trieUChars U_LIFETIME_BOUND)
+            : ownedArray_(nullptr), uchars_(trieUChars),
               pos_(uchars_), remainingMatchLength_(-1) {}
 
     /**
@@ -83,7 +83,7 @@ public:
      * @stable ICU 4.8
      */
     UCharsTrie(const UCharsTrie &other)
-            : ownedArray_(NULL), uchars_(other.uchars_),
+            : ownedArray_(nullptr), uchars_(other.uchars_),
               pos_(other.pos_), remainingMatchLength_(other.remainingMatchLength_) {}
 
     /**
@@ -91,7 +91,7 @@ public:
      * @return *this
      * @stable ICU 4.8
      */
-    UCharsTrie &reset() {
+    UCharsTrie& reset() U_LIFETIME_BOUND {
         pos_=uchars_;
         remainingMatchLength_=-1;
         return *this;
@@ -107,7 +107,7 @@ public:
      */
     uint64_t getState64() const {
         return (static_cast<uint64_t>(remainingMatchLength_ + 2) << kState64RemainingShift) |
-            (uint64_t)(pos_ - uchars_);
+            static_cast<uint64_t>(pos_ - uchars_);
     }
 
     /**
@@ -124,7 +124,7 @@ public:
      * @see reset
      * @stable ICU 65
      */
-    UCharsTrie &resetToState64(uint64_t state) {
+    UCharsTrie& resetToState64(uint64_t state) U_LIFETIME_BOUND {
         remainingMatchLength_ = static_cast<int32_t>(state >> kState64RemainingShift) - 2;
         pos_ = uchars_ + (state & kState64PosMask);
         return *this;
@@ -141,7 +141,7 @@ public:
          * Constructs an empty State.
          * @stable ICU 4.8
          */
-        State() { uchars=NULL; }
+        State() { uchars=nullptr; }
     private:
         friend class UCharsTrie;
 
@@ -157,7 +157,7 @@ public:
      * @see resetToState
      * @stable ICU 4.8
      */
-    const UCharsTrie &saveState(State &state) const {
+    const UCharsTrie& saveState(State& state) const U_LIFETIME_BOUND {
         state.uchars=uchars_;
         state.pos=pos_;
         state.remainingMatchLength=remainingMatchLength_;
@@ -174,8 +174,8 @@ public:
      * @see reset
      * @stable ICU 4.8
      */
-    UCharsTrie &resetToState(const State &state) {
-        if(uchars_==state.uchars && uchars_!=NULL) {
+    UCharsTrie& resetToState(const State& state) U_LIFETIME_BOUND {
+        if(uchars_==state.uchars && uchars_!=nullptr) {
             pos_=state.pos;
             remainingMatchLength_=state.remainingMatchLength;
         }
@@ -239,7 +239,7 @@ public:
      *   result=next(c);
      * return result;
      * \endcode
-     * @param s A string. Can be NULL if length is 0.
+     * @param s A string. Can be nullptr if length is 0.
      * @param length The length of the string. Can be -1 if NUL-terminated.
      * @return The match/value Result.
      * @stable ICU 4.8
@@ -275,7 +275,7 @@ public:
     inline UBool hasUniqueValue(int32_t &uniqueValue) const {
         const char16_t *pos=pos_;
         // Skip the rest of a pending linear-match node.
-        return pos!=NULL && findUniqueValue(pos+remainingMatchLength_+1, false, uniqueValue);
+        return pos!=nullptr && findUniqueValue(pos+remainingMatchLength_+1, false, uniqueValue);
     }
 
     /**
@@ -304,7 +304,7 @@ public:
          *                  function chaining. (See User Guide for details.)
          * @stable ICU 4.8
          */
-        Iterator(ConstChar16Ptr trieUChars, int32_t maxStringLength, UErrorCode &errorCode);
+        Iterator(ConstChar16Ptr trieUChars U_LIFETIME_BOUND, int32_t maxStringLength, UErrorCode& errorCode);
 
         /**
          * Iterates from the current state of the specified UCharsTrie.
@@ -330,7 +330,7 @@ public:
          * @return *this
          * @stable ICU 4.8
          */
-        Iterator &reset();
+        Iterator& reset() U_LIFETIME_BOUND;
 
         /**
          * @return true if there are more elements.
@@ -358,7 +358,7 @@ public:
          * @return The string for the last successful next().
          * @stable ICU 4.8
          */
-        const UnicodeString &getString() const { return str_; }
+        const UnicodeString& getString() const U_LIFETIME_BOUND { return str_; }
         /**
          * @return The value for the last successful next().
          * @stable ICU 4.8
@@ -367,12 +367,14 @@ public:
 
     private:
         UBool truncateAndStop() {
-            pos_=NULL;
+            pos_=nullptr;
             value_=-1;  // no real value for str
             return true;
         }
 
-        const char16_t *branchNext(const char16_t *pos, int32_t length, UErrorCode &errorCode);
+        const char16_t* branchNext(const char16_t* pos U_LIFETIME_BOUND,
+                                   int32_t length,
+                                   UErrorCode& errorCode);
 
         const char16_t *uchars_;
         const char16_t *pos_;
@@ -409,10 +411,10 @@ private:
               pos_(uchars_), remainingMatchLength_(-1) {}
 
     // No assignment operator.
-    UCharsTrie &operator=(const UCharsTrie &other);
+    UCharsTrie &operator=(const UCharsTrie &other) = delete;
 
     inline void stop() {
-        pos_=NULL;
+        pos_=nullptr;
     }
 
     // Reads a compact 32-bit integer.
@@ -428,7 +430,8 @@ private:
         }
         return value;
     }
-    static inline const char16_t *skipValue(const char16_t *pos, int32_t leadUnit) {
+    static inline const char16_t* skipValue(const char16_t* pos U_LIFETIME_BOUND,
+                                            int32_t leadUnit) {
         if(leadUnit>=kMinTwoUnitValueLead) {
             if(leadUnit<kThreeUnitValueLead) {
                 ++pos;
@@ -438,7 +441,7 @@ private:
         }
         return pos;
     }
-    static inline const char16_t *skipValue(const char16_t *pos) {
+    static inline const char16_t* skipValue(const char16_t* pos U_LIFETIME_BOUND) {
         int32_t leadUnit=*pos++;
         return skipValue(pos, leadUnit&0x7fff);
     }
@@ -455,7 +458,8 @@ private:
         }
         return value;
     }
-    static inline const char16_t *skipNodeValue(const char16_t *pos, int32_t leadUnit) {
+    static inline const char16_t* skipNodeValue(const char16_t* pos U_LIFETIME_BOUND,
+                                                int32_t leadUnit) {
         // U_ASSERT(kMinValueLead<=leadUnit && leadUnit<kValueIsFinal);
         if(leadUnit>=kMinTwoUnitNodeValueLead) {
             if(leadUnit<kThreeUnitNodeValueLead) {
@@ -467,7 +471,7 @@ private:
         return pos;
     }
 
-    static inline const char16_t *jumpByDelta(const char16_t *pos) {
+    static inline const char16_t* jumpByDelta(const char16_t* pos U_LIFETIME_BOUND) {
         int32_t delta=*pos++;
         if(delta>=kMinTwoUnitDeltaLead) {
             if(delta==kThreeUnitDeltaLead) {
@@ -480,7 +484,7 @@ private:
         return pos+delta;
     }
 
-    static const char16_t *skipDelta(const char16_t *pos) {
+    static const char16_t* skipDelta(const char16_t* pos U_LIFETIME_BOUND) {
         int32_t delta=*pos++;
         if(delta>=kMinTwoUnitDeltaLead) {
             if(delta==kThreeUnitDeltaLead) {
@@ -493,7 +497,7 @@ private:
     }
 
     static inline UStringTrieResult valueResult(int32_t node) {
-        return (UStringTrieResult)(USTRINGTRIE_INTERMEDIATE_VALUE-(node>>15));
+        return static_cast<UStringTrieResult>(USTRINGTRIE_INTERMEDIATE_VALUE - (node >> 15));
     }
 
     // Handles a branch node for both next(uchar) and next(string).
@@ -505,8 +509,10 @@ private:
     // Helper functions for hasUniqueValue().
     // Recursively finds a unique value (or whether there is not a unique one)
     // from a branch.
-    static const char16_t *findUniqueValueFromBranch(const char16_t *pos, int32_t length,
-                                                  UBool haveUniqueValue, int32_t &uniqueValue);
+    static const char16_t* findUniqueValueFromBranch(const char16_t* pos U_LIFETIME_BOUND,
+                                                     int32_t length,
+                                                     UBool haveUniqueValue,
+                                                     int32_t& uniqueValue);
     // Recursively finds a unique value (or whether there is not a unique one)
     // starting from a position on a node lead unit.
     static UBool findUniqueValue(const char16_t *pos, UBool haveUniqueValue, int32_t &uniqueValue);
@@ -610,7 +616,7 @@ private:
 
     // Iterator variables.
 
-    // Pointer to next trie unit to read. NULL if no more matches.
+    // Pointer to next trie unit to read. nullptr if no more matches.
     const char16_t *pos_;
     // Remaining length of a linear-match node, minus 1. Negative if not in such a node.
     int32_t remainingMatchLength_;

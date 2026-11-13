@@ -37,8 +37,7 @@
  *   ("minimum-length-problem" of UTF-8)
  * - The BiDi control characters need only one code unit each
  *
- * Further assumptions for all UTFs:
- * - u_charMirror(c) needs the same number of code units as c
+ * Note: Since Unicode 18, u_charMirror(c) may change the number of code units.
  */
 #if defined(UTF_SIZE) && UTF_SIZE==8
 # error reimplement ubidi_writeReordered() for UTF-8, see comment above
@@ -56,10 +55,14 @@
  * we are writing RTL output in reverse.
  */
 static int32_t
-doWriteForward(const UChar *src, int32_t srcLength,
-               UChar *dest, int32_t destSize,
+doWriteForward(const char16_t *src, int32_t srcLength,
+               char16_t *dest, int32_t destSize,
                uint16_t options,
                UErrorCode *pErrorCode) {
+    if (srcLength<=0) {
+        *pErrorCode=U_ILLEGAL_ARGUMENT_ERROR;
+        return 0;
+    }
     /* optimize for several combinations of options */
     switch(options&(UBIDI_REMOVE_BIDI_CONTROLS|UBIDI_DO_MIRRORING)) {
     case 0: {
@@ -78,22 +81,36 @@ doWriteForward(const UChar *src, int32_t srcLength,
         /* do mirroring */
         int32_t i=0, j=0;
         UChar32 c;
-
-        if(destSize<srcLength) {
-            *pErrorCode=U_BUFFER_OVERFLOW_ERROR;
-            return srcLength;
-        }
         do {
             U16_NEXT(src, i, srcLength, c);
             c=u_charMirror(c);
-            U16_APPEND_UNSAFE(dest, j, c);
+            int32_t charLen = U16_LENGTH(c);
+            if(j + charLen <= destSize) {
+                int32_t temp = j;
+                U16_APPEND_UNSAFE(dest, temp, c);
+            }
+            j += charLen;
         } while(i<srcLength);
+        if(destSize < j) {
+            *pErrorCode = U_BUFFER_OVERFLOW_ERROR;
+        }
+        if(j > srcLength) {
+            return j;
+        }
+        /* If mirroring caused code unit contraction (e.g., U+1DB10 contracting to U+221D),
+         * pad trailing array slots up to srcLength to avoid leaving uninitialized memory.
+         * If j > 0, repeat the preceding code unit; if j == 0, fallback to 0x0020 (ASCII space).
+         */
+        while(j < srcLength && j < destSize) {
+            dest[j] = j > 0 ? dest[j - 1] : 0x0020;
+            j++;
+        }
         return srcLength;
     }
     case UBIDI_REMOVE_BIDI_CONTROLS: {
         /* copy the LTR run and remove any BiDi control characters */
         int32_t remaining=destSize;
-        UChar c;
+        char16_t c;
         do {
             c=*src++;
             if(!IS_BIDI_CONTROL_CHAR(c)) {
@@ -116,7 +133,6 @@ doWriteForward(const UChar *src, int32_t srcLength,
     }
     default: {
         /* remove BiDi control characters and do mirroring */
-        int32_t remaining=destSize;
         int32_t i, j=0;
         UChar32 c;
         do {
@@ -125,32 +141,26 @@ doWriteForward(const UChar *src, int32_t srcLength,
             src+=i;
             srcLength-=i;
             if(!IS_BIDI_CONTROL_CHAR(c)) {
-                remaining-=i;
-                if(remaining<0) {
-                    *pErrorCode=U_BUFFER_OVERFLOW_ERROR;
-
-                    /* preflight the length */
-                    while(srcLength>0) {
-                        c=*src++;
-                        if(!IS_BIDI_CONTROL_CHAR(c)) {
-                            --remaining;
-                        }
-                        --srcLength;
-                    }
-                    return destSize-remaining;
-                }
                 c=u_charMirror(c);
-                U16_APPEND_UNSAFE(dest, j, c);
+                int32_t charLen = U16_LENGTH(c);
+                if(j + charLen <= destSize) {
+                    int32_t temp = j;
+                    U16_APPEND_UNSAFE(dest, temp, c);
+                }
+                j += charLen;
             }
         } while(srcLength>0);
+        if(destSize < j) {
+            *pErrorCode = U_BUFFER_OVERFLOW_ERROR;
+        }
         return j;
     }
     } /* end of switch */
 }
 
 static int32_t
-doWriteReverse(const UChar *src, int32_t srcLength,
-               UChar *dest, int32_t destSize,
+doWriteReverse(const char16_t *src, int32_t srcLength,
+               char16_t *dest, int32_t destSize,
                uint16_t options,
                UErrorCode *pErrorCode) {
     /*
@@ -174,6 +184,11 @@ doWriteReverse(const UChar *src, int32_t srcLength,
     int32_t i, j;
     UChar32 c;
 
+    if(srcLength<=0) {
+        *pErrorCode=U_ILLEGAL_ARGUMENT_ERROR;
+        return 0;
+    }
+
     /* optimize for several combinations of options */
     switch(options&(UBIDI_REMOVE_BIDI_CONTROLS|UBIDI_DO_MIRRORING|UBIDI_KEEP_BASE_COMBINING)) {
     case 0:
@@ -195,7 +210,7 @@ doWriteReverse(const UChar *src, int32_t srcLength,
             i=srcLength;
 
             /* collect code units for one base character */
-            U16_BACK_1(src, 0, srcLength);
+            U16_PREV(src, 0, srcLength, c);
 
             /* copy this base character */
             j=srcLength;
@@ -234,98 +249,157 @@ doWriteReverse(const UChar *src, int32_t srcLength,
             } while(j<i);
         } while(srcLength>0);
         break;
-    default:
+    default: {
         /*
-         * With several "complicated" options set, this is the most
-         * general and the slowest copying of an RTL run.
-         * We will do mirroring, remove BiDi controls, and
-         * keep combining characters with their base characters
-         * as requested.
+         * Note on UBIDI_INTERNAL_RUNS_ONLY:
+         * This internal flag is passed exclusively by setParaRunsOnly() in ubidi.cpp during
+         * Scheme 9 (LOGICAL, RTL => LOGICAL, LTR) BidiTransform transformations.
+         * When mirroring contracts a code point (e.g., U+1DB10 contracting to U+221D),
+         * setParaRunsOnly() requires legacy ICU 1-to-1 code unit stepping (j += k) and
+         * returning destSize (which equals srcLength). This prevents array desynchronization
+         * between visualLength and pBiDi->length, and allows the trailing surrogate half
+         * of U+1DB10 (which has Bidi class LTR) to be copied into visualText to split
+         * the run for reordering.
+         * 
+         * For all other calls (direct user API calls to ubidi_writeReverse, or normal
+         * reordering), we use character stepping (j += origBaseLen) and return destLength,
+         * which correctly handles expansion and contraction without leaking broken surrogates.
          */
-        if(!(options&UBIDI_REMOVE_BIDI_CONTROLS)) {
-            i=srcLength;
-        } else {
-            /* we need to find out the destination length of the run,
-               which will not include the BiDi control characters */
-            int32_t length=srcLength;
-            UChar ch;
-
-            i=0;
+        if(options&UBIDI_INTERNAL_RUNS_ONLY) {
+            if(!(options&UBIDI_REMOVE_BIDI_CONTROLS)) {
+                i=srcLength;
+            } else {
+                int32_t length=srcLength;
+                char16_t ch;
+                i=0;
+                /* Loop over all code units in the source run to count those that are not Bidi control characters,
+                 * determining the required destination buffer length for preflighting when UBIDI_REMOVE_BIDI_CONTROLS is set.
+                 */
+                do {
+                    ch=*src++;
+                    if(!IS_BIDI_CONTROL_CHAR(ch)) {
+                        ++i;
+                    }
+                } while(--length>0);
+                src-=srcLength;
+            }
+            if(destSize<i) {
+                *pErrorCode=U_BUFFER_OVERFLOW_ERROR;
+                return i;
+            }
+            char16_t *saveDest=dest;
+            int32_t destLength=0;
+            /* Loop backward across the source run segment by segment, using legacy 1-to-1 code unit stepping
+             * to extract and reverse character clusters for internal setPara classification.
+             */
             do {
-                ch=*src++;
-                if(!IS_BIDI_CONTROL_CHAR(ch)) {
-                    ++i;
+                i=srcLength;
+                U16_PREV(src, 0, srcLength, c);
+                if(options&UBIDI_KEEP_BASE_COMBINING) {
+                    /* Loop backward over any combining marks attached to the base character so that the combining
+                     * sequence remains attached after its base character when reversed.
+                     */
+                    while(srcLength>0 && IS_COMBINING(u_charType(c))) {
+                        U16_PREV(src, 0, srcLength, c);
+                    }
                 }
-            } while(--length>0);
-            src-=srcLength;
+                if(options&UBIDI_REMOVE_BIDI_CONTROLS && IS_BIDI_CONTROL_CHAR(c)) {
+                    continue;
+                }
+                int32_t origBaseLen=U16_LENGTH(c);
+                j=srcLength;
+                if(options&UBIDI_DO_MIRRORING) {
+                    c=u_charMirror(c);
+                    int32_t k=U16_LENGTH(c);
+                    if(destLength+k<=destSize) {
+                        int32_t temp=destLength;
+                        U16_APPEND_UNSAFE(saveDest, temp, c);
+                    }
+                    destLength+=k;
+                    j+=origBaseLen;
+                }
+                /* Loop forward from the current segment index to copy any unmirrored code units (such as combining marks
+                 * or surrogate halves) into dest in forward visual order.
+                 */
+                while(j<i) {
+                    if(destLength<destSize) {
+                        saveDest[destLength]=src[j];
+                    }
+                    destLength++;
+                    j++;
+                }
+            } while(srcLength>0);
+            if(destSize<destLength) {
+                *pErrorCode=U_BUFFER_OVERFLOW_ERROR;
+            }
+            return destLength;
         }
-
-        if(destSize<i) {
-            *pErrorCode=U_BUFFER_OVERFLOW_ERROR;
-            return i;
-        }
-        destSize=i;
-
-        /* preserve character integrity */
+        int32_t destLength=0;
         do {
-            /* i is always after the last code unit known to need to be kept in this segment */
             i=srcLength;
-
-            /* collect code units for one base character */
             U16_PREV(src, 0, srcLength, c);
             if(options&UBIDI_KEEP_BASE_COMBINING) {
-                /* collect modifier letters for this base character */
                 while(srcLength>0 && IS_COMBINING(u_charType(c))) {
                     U16_PREV(src, 0, srcLength, c);
                 }
             }
-
             if(options&UBIDI_REMOVE_BIDI_CONTROLS && IS_BIDI_CONTROL_CHAR(c)) {
-                /* do not copy this BiDi control character */
                 continue;
             }
 
-            /* copy this "user character" */
+            int32_t origBaseLen=U16_LENGTH(c);
             j=srcLength;
             if(options&UBIDI_DO_MIRRORING) {
                 /* mirror only the base character */
-                int32_t k=0;
                 c=u_charMirror(c);
-                U16_APPEND_UNSAFE(dest, k, c);
-                dest+=k;
-                j+=k;
+                int32_t k=U16_LENGTH(c);
+                if(destLength+k<=destSize) {
+                    int32_t temp=destLength;
+                    U16_APPEND_UNSAFE(dest, temp, c);
+                }
+                destLength+=k;
+                j+=origBaseLen;
             }
             while(j<i) {
-                *dest++=src[j++];
+                if(destLength<destSize) {
+                    dest[destLength]=src[j];
+                }
+                destLength++;
+                j++;
             }
         } while(srcLength>0);
-        break;
-    } /* end of switch */
 
+
+        if(destSize<destLength) {
+            *pErrorCode=U_BUFFER_OVERFLOW_ERROR;
+        }
+        return destLength;
+    }
+    } /* end of switch */
     return destSize;
 }
 
 U_CAPI int32_t U_EXPORT2
-ubidi_writeReverse(const UChar *src, int32_t srcLength,
-                   UChar *dest, int32_t destSize,
+ubidi_writeReverse(const char16_t *src, int32_t srcLength,
+                   char16_t *dest, int32_t destSize,
                    uint16_t options,
                    UErrorCode *pErrorCode) {
     int32_t destLength;
 
-    if(pErrorCode==NULL || U_FAILURE(*pErrorCode)) {
+    if(pErrorCode==nullptr || U_FAILURE(*pErrorCode)) {
         return 0;
     }
 
     /* more error checking */
-    if( src==NULL || srcLength<-1 ||
-        destSize<0 || (destSize>0 && dest==NULL))
+    if( src==nullptr || srcLength<-1 ||
+        destSize<0 || (destSize>0 && dest==nullptr))
     {
         *pErrorCode=U_ILLEGAL_ARGUMENT_ERROR;
         return 0;
     }
 
     /* do input and output overlap? */
-    if( dest!=NULL &&
+    if( dest!=nullptr &&
         ((src>=dest && src<dest+destSize) ||
          (dest>=src && dest<src+srcLength)))
     {
@@ -355,29 +429,29 @@ ubidi_writeReverse(const UChar *src, int32_t srcLength,
 #endif
 U_CAPI int32_t U_EXPORT2
 ubidi_writeReordered(UBiDi *pBiDi,
-                     UChar *dest, int32_t destSize,
+                     char16_t *dest, int32_t destSize,
                      uint16_t options,
                      UErrorCode *pErrorCode) {
-    const UChar *text;
-    UChar *saveDest;
+    const char16_t *text;
+    char16_t *saveDest;
     int32_t length, destCapacity;
     int32_t run, runCount, logicalStart, runLength;
 
-    if(pErrorCode==NULL || U_FAILURE(*pErrorCode)) {
+    if(pErrorCode==nullptr || U_FAILURE(*pErrorCode)) {
         return 0;
     }
 
     /* more error checking */
-    if( pBiDi==NULL ||
-        (text=pBiDi->text)==NULL || (length=pBiDi->length)<0 ||
-        destSize<0 || (destSize>0 && dest==NULL))
+    if( pBiDi==nullptr ||
+        (text=pBiDi->text)==nullptr || (length=pBiDi->length)<0 ||
+        destSize<0 || (destSize>0 && dest==nullptr))
     {
         *pErrorCode=U_ILLEGAL_ARGUMENT_ERROR;
         return 0;
     }
 
     /* do input and output overlap? */
-    if( dest!=NULL &&
+    if( dest!=nullptr &&
         ((text>=dest && text<dest+destSize) ||
          (dest>=text && dest<text+pBiDi->originalLength)))
     {
@@ -398,6 +472,7 @@ ubidi_writeReordered(UBiDi *pBiDi,
     /* destSize shrinks, later destination length=destCapacity-destSize */
     saveDest=dest;
     destCapacity=destSize;
+    runLength = 0;
 
     /*
      * Option "insert marks" implies UBIDI_INSERT_LRM_FOR_NUMERIC if the
@@ -451,7 +526,7 @@ ubidi_writeReordered(UBiDi *pBiDi,
                                              dest, destSize,
                                              options, pErrorCode);
                 }
-                if(dest!=NULL) {
+                if(dest!=nullptr) {
                   dest+=runLength;
                 }
                 destSize-=runLength;
@@ -459,8 +534,8 @@ ubidi_writeReordered(UBiDi *pBiDi,
         } else {
             /* insert BiDi controls for "inverse BiDi" */
             const DirProp *dirProps=pBiDi->dirProps;
-            const UChar *src;
-            UChar uc;
+            const char16_t *src;
+            char16_t uc;
             UBiDiDirection dir;
             int32_t markFlag;
 
@@ -495,13 +570,16 @@ ubidi_writeReordered(UBiDi *pBiDi,
                     runLength=doWriteForward(src, runLength,
                                              dest, destSize,
                                              (uint16_t)(options&~UBIDI_DO_MIRRORING), pErrorCode);
-                    if(dest!=NULL) {
+                    if(dest!=nullptr) {
                       dest+=runLength;
                     }
                     destSize-=runLength;
 
                     if((pBiDi->isInverse) &&
-                       (/*run<runCount-1 &&*/ dirProps[logicalStart+runLength-1]!=L)) {
+                           (/*run<runCount-1 &&*/
+                            runLength > 0 && // doWriteForward may return 0 if src
+                                             // only include bidi control chars
+                            dirProps[logicalStart+runLength-1]!=L)) {
                         markFlag |= LRM_AFTER;
                     }
                     if (markFlag & LRM_AFTER) {
@@ -539,7 +617,7 @@ ubidi_writeReordered(UBiDi *pBiDi,
                     runLength=doWriteReverse(src, runLength,
                                              dest, destSize,
                                              options, pErrorCode);
-                    if(dest!=NULL) {
+                    if(dest!=nullptr) {
                       dest+=runLength;
                     }
                     destSize-=runLength;
@@ -578,7 +656,7 @@ ubidi_writeReordered(UBiDi *pBiDi,
                                              dest, destSize,
                                              options, pErrorCode);
                 }
-                if(dest!=NULL) {
+                if(dest!=nullptr) {
                   dest+=runLength;
                 }
                 destSize-=runLength;
@@ -586,7 +664,7 @@ ubidi_writeReordered(UBiDi *pBiDi,
         } else {
             /* insert BiDi controls for "inverse BiDi" */
             const DirProp *dirProps=pBiDi->dirProps;
-            const UChar *src;
+            const char16_t *src;
             UBiDiDirection dir;
 
             for(run=runCount; --run>=0;) {
@@ -605,7 +683,7 @@ ubidi_writeReordered(UBiDi *pBiDi,
                     runLength=doWriteReverse(src, runLength,
                                              dest, destSize,
                                              (uint16_t)(options&~UBIDI_DO_MIRRORING), pErrorCode);
-                    if(dest!=NULL) {
+                    if(dest!=nullptr) {
                       dest+=runLength;
                     }
                     destSize-=runLength;
@@ -624,15 +702,19 @@ ubidi_writeReordered(UBiDi *pBiDi,
                         --destSize;
                     }
 
+                    int32_t originalRunLength = runLength;
                     runLength=doWriteForward(src, runLength,
                                              dest, destSize,
                                              options, pErrorCode);
-                    if(dest!=NULL) {
+                    if(dest!=nullptr) {
                       dest+=runLength;
                     }
                     destSize-=runLength;
 
-                    if(/*run>0 &&*/ !(MASK_R_AL&DIRPROP_FLAG(dirProps[logicalStart+runLength-1]))) {
+                    if(/*run>0 &&*/
+                            runLength > 0 && // doWriteForward may return 0 if src
+                                             // only include bidi control chars
+                            !(MASK_R_AL&DIRPROP_FLAG(dirProps[logicalStart+originalRunLength-1]))) {
                         if(destSize>0) {
                             *dest++=RLM_CHAR;
                         }

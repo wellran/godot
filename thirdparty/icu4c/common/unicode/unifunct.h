@@ -63,7 +63,7 @@ public:
      * UnicodeFunctor.
      * @stable ICU 2.4
      */
-    virtual UnicodeMatcher* toMatcher() const;
+    virtual UnicodeMatcher* toMatcher() const U_LIFETIME_BOUND;
 
     /**
      * Cast 'this' to a UnicodeReplacer* pointer and return the
@@ -75,7 +75,7 @@ public:
      * UnicodeFunctor.
      * @stable ICU 2.4
      */
-    virtual UnicodeReplacer* toReplacer() const;
+    virtual UnicodeReplacer* toReplacer() const U_LIFETIME_BOUND;
 
     /**
      * Return the class ID for this class.  This is useful only for
@@ -83,7 +83,7 @@ public:
      * @return          The class ID for all objects of this class.
      * @stable ICU 2.0
      */
-    static UClassID U_EXPORT2 getStaticClassID(void);
+    static UClassID U_EXPORT2 getStaticClassID();
 
     /**
      * Returns a unique class ID <b>polymorphically</b>.  This method
@@ -100,7 +100,7 @@ public:
      * different class IDs.
      * @stable ICU 2.4
      */
-    virtual UClassID getDynamicClassID(void) const override = 0;
+    virtual UClassID getDynamicClassID() const override = 0;
 
     /**
      * Set the data object associated with this functor.  The data

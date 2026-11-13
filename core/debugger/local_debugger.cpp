@@ -1,43 +1,45 @@
-/*************************************************************************/
-/*  local_debugger.cpp                                                   */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  local_debugger.cpp                                                    */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
 #include "local_debugger.h"
 
 #include "core/debugger/script_debugger.h"
+#include "core/os/main_loop.h"
 #include "core/os/os.h"
-#include "scene/main/scene_tree.h"
+
+#include <cstdio>
 
 struct LocalDebugger::ScriptsProfiler {
 	struct ProfileInfoSort {
-		bool operator()(const ScriptLanguage::ProfilingInfo &A, const ScriptLanguage::ProfilingInfo &B) const {
-			return A.total_time > B.total_time;
+		bool operator()(const ScriptLanguage::ProfilingInfo &p_left, const ScriptLanguage::ProfilingInfo &p_right) const {
+			return p_left.total_time > p_right.total_time;
 		}
 	};
 
@@ -61,7 +63,7 @@ struct LocalDebugger::ScriptsProfiler {
 		}
 	}
 
-	void tick(double p_frame_time, double p_idle_time, double p_physics_time, double p_physics_frame_time) {
+	void tick(double p_frame_time, double p_process_time, double p_physics_time, double p_physics_frame_time) {
 		frame_time = p_frame_time;
 		_print_frame_data(false);
 	}
@@ -115,6 +117,10 @@ struct LocalDebugger::ScriptsProfiler {
 };
 
 void LocalDebugger::debug(bool p_can_continue, bool p_is_error_breakpoint) {
+	if (script_debugger->is_ignoring_error_breaks() && p_is_error_breakpoint) {
+		return;
+	}
+
 	ScriptLanguage *script_lang = script_debugger->get_break_language();
 
 	if (!target_function.is_empty()) {
@@ -139,7 +145,7 @@ void LocalDebugger::debug(bool p_can_continue, bool p_is_error_breakpoint) {
 		// Cache options
 		String variable_prefix = options["variable_prefix"];
 
-		if (line == "") {
+		if (line.is_empty() && !feof(stdin)) {
 			print_line("\nDebugger Break, Reason: '" + script_lang->debug_get_error() + "'");
 			print_line("*Frame " + itos(current_frame) + " - " + script_lang->debug_get_stack_level_source(current_frame) + ":" + itos(script_lang->debug_get_stack_level_line(current_frame)) + " in function '" + script_lang->debug_get_stack_level_function(current_frame) + "'");
 			print_line("Enter \"help\" for assistance.");
@@ -172,7 +178,7 @@ void LocalDebugger::debug(bool p_can_continue, bool p_is_error_breakpoint) {
 
 			} else {
 				String key_value = line.get_slicec(' ', 1);
-				int value_pos = key_value.find("=");
+				int value_pos = key_value.find_char('=');
 
 				if (value_pos < 0) {
 					print_line("Error: Invalid set format. Use: set key=value");
@@ -209,10 +215,10 @@ void LocalDebugger::debug(bool p_can_continue, bool p_is_error_breakpoint) {
 			print_variables(members, values, variable_prefix);
 
 		} else if (line.begins_with("p") || line.begins_with("print")) {
-			if (line.get_slice_count(" ") <= 1) {
-				print_line("Usage: print <expre>");
+			if (line.find_char(' ') < 0) {
+				print_line("Usage: print <expression>");
 			} else {
-				String expr = line.get_slicec(' ', 2);
+				String expr = line.split(" ", true, 1)[1];
 				String res = script_lang->debug_parse_stack_level_expression(current_frame, expr);
 				print_line(res);
 			}
@@ -223,6 +229,10 @@ void LocalDebugger::debug(bool p_can_continue, bool p_is_error_breakpoint) {
 			break;
 		} else if (line == "n" || line == "next") {
 			script_debugger->set_depth(0);
+			script_debugger->set_lines_left(1);
+			break;
+		} else if (line == "o" || line == "out") {
+			script_debugger->set_depth(1);
 			script_debugger->set_lines_left(1);
 			break;
 		} else if (line == "fin" || line == "finish") {
@@ -242,15 +252,15 @@ void LocalDebugger::debug(bool p_can_continue, bool p_is_error_breakpoint) {
 
 		} else if (line.begins_with("br") || line.begins_with("break")) {
 			if (line.get_slice_count(" ") <= 1) {
-				const Map<int, Set<StringName>> &breakpoints = script_debugger->get_breakpoints();
-				if (breakpoints.size() == 0) {
+				const HashMap<int, HashSet<StringName>> &breakpoints = script_debugger->get_breakpoints();
+				if (breakpoints.is_empty()) {
 					print_line("No Breakpoints.");
 					continue;
 				}
 
 				print_line("Breakpoint(s): " + itos(breakpoints.size()));
-				for (const KeyValue<int, Set<StringName>> &E : breakpoints) {
-					print_line("\t" + String(E.value.front()->get()) + ":" + itos(E.key));
+				for (const KeyValue<int, HashSet<StringName>> &E : breakpoints) {
+					print_line("\t" + String(*E.value.begin()) + ":" + itos(E.key));
 				}
 
 			} else {
@@ -268,13 +278,17 @@ void LocalDebugger::debug(bool p_can_continue, bool p_is_error_breakpoint) {
 				print_line("Added breakpoint at " + source + ":" + itos(linenr));
 			}
 
-		} else if (line == "q" || line == "quit") {
+		} else if (line == "q" || line == "quit" ||
+				(line.is_empty() && feof(stdin))) {
 			// Do not stop again on quit
 			script_debugger->clear_breakpoints();
 			script_debugger->set_depth(-1);
 			script_debugger->set_lines_left(-1);
 
-			SceneTree::get_singleton()->quit();
+			MainLoop *main_loop = OS::get_singleton()->get_main_loop();
+			if (main_loop->get_class() == "SceneTree") {
+				main_loop->call("quit");
+			}
 			break;
 		} else if (line.begins_with("delete")) {
 			if (line.get_slice_count(" ") <= 1) {
@@ -316,20 +330,20 @@ void LocalDebugger::debug(bool p_can_continue, bool p_is_error_breakpoint) {
 	}
 }
 
-void LocalDebugger::print_variables(const List<String> &names, const List<Variant> &values, const String &variable_prefix) {
+void LocalDebugger::print_variables(const List<String> &p_names, const List<Variant> &p_values, const String &p_variable_prefix) {
 	String value;
 	Vector<String> value_lines;
-	const List<Variant>::Element *V = values.front();
-	for (const String &E : names) {
+	const List<Variant>::Element *V = p_values.front();
+	for (const String &E : p_names) {
 		value = String(V->get());
 
-		if (variable_prefix.is_empty()) {
+		if (p_variable_prefix.is_empty()) {
 			print_line(E + ": " + String(V->get()));
 		} else {
 			print_line(E + ":");
 			value_lines = value.split("\n");
 			for (int i = 0; i < value_lines.size(); ++i) {
-				print_line(variable_prefix + value_lines[i]);
+				print_line(p_variable_prefix + value_lines[i]);
 			}
 		}
 
@@ -341,7 +355,7 @@ Pair<String, int> LocalDebugger::to_breakpoint(const String &p_line) {
 	String breakpoint_part = p_line.get_slicec(' ', 1);
 	Pair<String, int> breakpoint;
 
-	int last_colon = breakpoint_part.rfind(":");
+	int last_colon = breakpoint_part.rfind_char(':');
 	if (last_colon < 0) {
 		print_line("Error: Invalid breakpoint format. Expected [source:line]");
 		return breakpoint;
@@ -359,7 +373,7 @@ void LocalDebugger::send_message(const String &p_message, const Array &p_args) {
 }
 
 void LocalDebugger::send_error(const String &p_func, const String &p_file, int p_line, const String &p_err, const String &p_descr, bool p_editor_notify, ErrorHandlerType p_type) {
-	print_line("ERROR: '" + (p_descr.is_empty() ? p_err : p_descr) + "'");
+	_err_print_error(p_func.utf8().get_data(), p_file.utf8().get_data(), p_line, p_err, p_descr, p_editor_notify, p_type);
 }
 
 LocalDebugger::LocalDebugger() {
@@ -370,18 +384,16 @@ LocalDebugger::LocalDebugger() {
 	Profiler scr_prof(
 			scripts_profiler,
 			[](void *p_user, bool p_enable, const Array &p_opts) {
-				((ScriptsProfiler *)p_user)->toggle(p_enable, p_opts);
+				static_cast<ScriptsProfiler *>(p_user)->toggle(p_enable, p_opts);
 			},
 			nullptr,
-			[](void *p_user, double p_frame_time, double p_idle_time, double p_physics_time, double p_physics_frame_time) {
-				((ScriptsProfiler *)p_user)->tick(p_frame_time, p_idle_time, p_physics_time, p_physics_frame_time);
+			[](void *p_user, double p_frame_time, double p_process_time, double p_physics_time, double p_physics_frame_time) {
+				static_cast<ScriptsProfiler *>(p_user)->tick(p_frame_time, p_process_time, p_physics_time, p_physics_frame_time);
 			});
 	register_profiler("scripts", scr_prof);
 }
 
 LocalDebugger::~LocalDebugger() {
 	unregister_profiler("scripts");
-	if (scripts_profiler) {
-		memdelete(scripts_profiler);
-	}
+	memdelete(scripts_profiler);
 }

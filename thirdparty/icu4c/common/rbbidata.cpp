@@ -38,7 +38,7 @@ RBBIDataWrapper::RBBIDataWrapper(const RBBIDataHeader *data, UErrorCode &status)
 RBBIDataWrapper::RBBIDataWrapper(const RBBIDataHeader *data, enum EDontAdopt, UErrorCode &status) {
     init0();
     init(data, status);
-    fDontFreeData = TRUE;
+    fDontFreeData = true;
 }
 
 RBBIDataWrapper::RBBIDataWrapper(UDataMemory* udm, UErrorCode &status) {
@@ -78,15 +78,15 @@ UBool RBBIDataWrapper::isDataVersionAcceptable(const UVersionInfo version) {
 //
 //-----------------------------------------------------------------------------
 void RBBIDataWrapper::init0() {
-    fHeader = NULL;
-    fForwardTable = NULL;
-    fReverseTable = NULL;
-    fRuleSource   = NULL;
-    fRuleStatusTable = NULL;
-    fTrie         = NULL;
-    fUDataMem     = NULL;
+    fHeader = nullptr;
+    fForwardTable = nullptr;
+    fReverseTable = nullptr;
+    fRuleSource   = nullptr;
+    fRuleStatusTable = nullptr;
+    fTrie         = nullptr;
+    fUDataMem     = nullptr;
     fRefCount     = 0;
-    fDontFreeData = TRUE;
+    fDontFreeData = true;
 }
 
 void RBBIDataWrapper::init(const RBBIDataHeader *data, UErrorCode &status) {
@@ -102,12 +102,12 @@ void RBBIDataWrapper::init(const RBBIDataHeader *data, UErrorCode &status) {
     //       that is no longer supported.  At that time fFormatVersion was
     //       an int32_t field, rather than an array of 4 bytes.
 
-    fDontFreeData = FALSE;
+    fDontFreeData = false;
     if (data->fFTableLen != 0) {
-        fForwardTable = (RBBIStateTable *)((char *)data + fHeader->fFTable);
+        fForwardTable = reinterpret_cast<const RBBIStateTable*>(reinterpret_cast<const char*>(data) + fHeader->fFTable);
     }
     if (data->fRTableLen != 0) {
-        fReverseTable = (RBBIStateTable *)((char *)data + fHeader->fRTable);
+        fReverseTable = reinterpret_cast<const RBBIStateTable*>(reinterpret_cast<const char*>(data) + fHeader->fRTable);
     }
 
     fTrie = ucptrie_openFromBinary(UCPTRIE_TYPE_FAST,
@@ -130,7 +130,7 @@ void RBBIDataWrapper::init(const RBBIDataHeader *data, UErrorCode &status) {
     fRuleString = UnicodeString::fromUTF8(StringPiece(fRuleSource, fHeader->fRuleSourceLen));
     U_ASSERT(data->fRuleSourceLen > 0);
 
-    fRuleStatusTable = (int32_t *)((char *)data + fHeader->fStatusTable);
+    fRuleStatusTable = reinterpret_cast<const int32_t*>(reinterpret_cast<const char*>(data) + fHeader->fStatusTable);
     fStatusMaxIdx    = data->fStatusTableLen / sizeof(int32_t);
 
     fRefCount = 1;
@@ -234,10 +234,9 @@ void  RBBIDataWrapper::printTable(const char *heading, const RBBIStateTable *tab
 
     RBBIDebugPrintf("   fDictCategoriesStart: %d\n", table->fDictCategoriesStart);
     RBBIDebugPrintf("   fLookAheadResultsSize: %d\n", table->fLookAheadResultsSize);
-    RBBIDebugPrintf("   Flags: %4x RBBI_LOOKAHEAD_HARD_BREAK=%s RBBI_BOF_REQUIRED=%s  RBBI_8BITS_ROWS=%s\n",
+    RBBIDebugPrintf("   Flags: %4x RBBI_LOOKAHEAD_HARD_BREAK=%s RBBI_8BITS_ROWS=%s\n",
                     table->fFlags,
                     table->fFlags & RBBI_LOOKAHEAD_HARD_BREAK ? "T" : "F",
-                    table->fFlags & RBBI_BOF_REQUIRED ? "T" : "F",
                     table->fFlags & RBBI_8BITS_ROWS ? "T" : "F");
     RBBIDebugPrintf("\nState |  Acc  LA TagIx");
     for (c=0; c<fHeader->fCatCount; c++) {RBBIDebugPrintf("%3d ", c);}
@@ -246,7 +245,7 @@ void  RBBIDataWrapper::printTable(const char *heading, const RBBIStateTable *tab
     }
     RBBIDebugPrintf("\n");
 
-    if (table == NULL) {
+    if (table == nullptr) {
         RBBIDebugPrintf("         N U L L   T A B L E\n\n");
         return;
     }
@@ -305,10 +304,10 @@ U_CAPI int32_t U_EXPORT2
 ubrk_swap(const UDataSwapper *ds, const void *inData, int32_t length, void *outData,
            UErrorCode *status) {
 
-    if (status == NULL || U_FAILURE(*status)) {
+    if (status == nullptr || U_FAILURE(*status)) {
         return 0;
     }
-    if(ds==NULL || inData==NULL || length<-1 || (length>0 && outData==NULL)) {
+    if(ds==nullptr || inData==nullptr || length<-1 || (length>0 && outData==nullptr)) {
         *status=U_ILLEGAL_ARGUMENT_ERROR;
         return 0;
     }

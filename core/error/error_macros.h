@@ -1,41 +1,46 @@
-/*************************************************************************/
-/*  error_macros.h                                                       */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  error_macros.h                                                        */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
-#ifndef ERROR_MACROS_H
-#define ERROR_MACROS_H
+#pragma once
+
+/*
+ * This file contains macros for error handling.
+ *
+ * For an overview, see:
+ * https://docs.godotengine.org/en/latest/engine_details/architecture/common_engine_methods_and_macros.html#error-macros
+ */
 
 #include "core/typedefs.h"
 
-#include "core/templates/safe_refcount.h"
-
 class String;
+class ObjectID;
 
 enum ErrorHandlerType {
 	ERR_HANDLER_ERROR,
@@ -43,6 +48,20 @@ enum ErrorHandlerType {
 	ERR_HANDLER_SCRIPT,
 	ERR_HANDLER_SHADER,
 };
+
+constexpr const char *_error_handler_type_string(ErrorHandlerType p_type) {
+	switch (p_type) {
+		case ERR_HANDLER_ERROR:
+			return "ERROR";
+		case ERR_HANDLER_WARNING:
+			return "WARNING";
+		case ERR_HANDLER_SCRIPT:
+			return "SCRIPT ERROR";
+		case ERR_HANDLER_SHADER:
+			return "SHADER ERROR";
+	}
+	return "UNKNOWN ERROR";
+}
 
 // Pointer to the error handler printing function. Reassign to any function to have errors printed.
 // Parameters: userdata, function, file, line, error, explanation, type.
@@ -53,22 +72,24 @@ struct ErrorHandlerList {
 	void *userdata = nullptr;
 
 	ErrorHandlerList *next = nullptr;
-
-	ErrorHandlerList() {}
 };
 
 void add_error_handler(ErrorHandlerList *p_handler);
-void remove_error_handler(ErrorHandlerList *p_handler);
+void remove_error_handler(const ErrorHandlerList *p_handler);
 
 // Functions used by the error macros.
-void _err_print_error(const char *p_function, const char *p_file, int p_line, const char *p_error, bool p_editor_notify = false, ErrorHandlerType p_type = ERR_HANDLER_ERROR);
-void _err_print_error(const char *p_function, const char *p_file, int p_line, const String &p_error, bool p_editor_notify = false, ErrorHandlerType p_type = ERR_HANDLER_ERROR);
-void _err_print_error(const char *p_function, const char *p_file, int p_line, const char *p_error, const char *p_message, bool p_editor_notify = false, ErrorHandlerType p_type = ERR_HANDLER_ERROR);
-void _err_print_error(const char *p_function, const char *p_file, int p_line, const String &p_error, const char *p_message, bool p_editor_notify = false, ErrorHandlerType p_type = ERR_HANDLER_ERROR);
-void _err_print_error(const char *p_function, const char *p_file, int p_line, const char *p_error, const String &p_message, bool p_editor_notify = false, ErrorHandlerType p_type = ERR_HANDLER_ERROR);
-void _err_print_error(const char *p_function, const char *p_file, int p_line, const String &p_error, const String &p_message, bool p_editor_notify = false, ErrorHandlerType p_type = ERR_HANDLER_ERROR);
-void _err_print_index_error(const char *p_function, const char *p_file, int p_line, int64_t p_index, int64_t p_size, const char *p_index_str, const char *p_size_str, const char *p_message = "", bool p_editor_notify = false, bool fatal = false);
-void _err_print_index_error(const char *p_function, const char *p_file, int p_line, int64_t p_index, int64_t p_size, const char *p_index_str, const char *p_size_str, const String &p_message, bool p_editor_notify = false, bool fatal = false);
+_NO_INLINE_ void _err_print_error(const char *p_function, const char *p_file, int p_line, const char *p_error, bool p_editor_notify = false, ErrorHandlerType p_type = ERR_HANDLER_ERROR);
+_NO_INLINE_ void _err_print_error(const char *p_function, const char *p_file, int p_line, const String &p_error, bool p_editor_notify = false, ErrorHandlerType p_type = ERR_HANDLER_ERROR);
+_NO_INLINE_ void _err_print_error(const char *p_function, const char *p_file, int p_line, const char *p_error, const char *p_message, bool p_editor_notify = false, ErrorHandlerType p_type = ERR_HANDLER_ERROR);
+_NO_INLINE_ void _err_print_error(const char *p_function, const char *p_file, int p_line, const String &p_error, const char *p_message, bool p_editor_notify = false, ErrorHandlerType p_type = ERR_HANDLER_ERROR);
+_NO_INLINE_ void _err_print_error(const char *p_function, const char *p_file, int p_line, const char *p_error, const String &p_message, bool p_editor_notify = false, ErrorHandlerType p_type = ERR_HANDLER_ERROR);
+_NO_INLINE_ void _err_print_error(const char *p_function, const char *p_file, int p_line, const String &p_error, const String &p_message, bool p_editor_notify = false, ErrorHandlerType p_type = ERR_HANDLER_ERROR);
+void _err_print_error_asap(const String &p_error, ErrorHandlerType p_type = ERR_HANDLER_ERROR);
+_NO_INLINE_ void _err_print_index_error(const char *p_function, const char *p_file, int p_line, int64_t p_index, int64_t p_size, const char *p_index_str, const char *p_size_str, const char *p_message = "", bool p_editor_notify = false, bool p_fatal = false);
+_NO_INLINE_ void _err_print_index_error(const char *p_function, const char *p_file, int p_line, int64_t p_index, int64_t p_size, const char *p_index_str, const char *p_size_str, const String &p_message, bool p_editor_notify = false, bool p_fatal = false);
+_NO_INLINE_ void _err_flush_stdout();
+
+void _physics_interpolation_warning(const char *p_function, const char *p_file, int p_line, ObjectID p_id, const char *p_warn_string);
 
 #ifdef __GNUC__
 //#define FUNCTION_STR __PRETTY_FUNCTION__ - too annoying
@@ -77,7 +98,7 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
 #define FUNCTION_STR __FUNCTION__
 #endif
 
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(__clang__)
 /**
  * Don't use GENERATE_TRAP() directly, should only be used be the macros below.
  */
@@ -105,6 +126,16 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * issues when expanded e.g. after an `if (cond) ERR_FAIL();` without braces.
  */
 
+/**
+ * Evaluate the expression. If it results in an Error != OK, silently return the error.
+ */
+#define RETURN_IF_ERROR(m_exp) \
+	if (Error _err_propagate_error = (m_exp); unlikely(_err_propagate_error != OK)) { \
+		static_assert(std::is_same_v<std::decay_t<decltype(m_exp)>, Error>, "RETURN_IF_ERROR expects an Error-returning expression"); \
+		return _err_propagate_error; \
+	} else \
+		((void)0)
+
 // Index out of bounds error macros.
 // These macros should be used instead of `ERR_FAIL_COND` for bounds checking.
 
@@ -117,33 +148,32 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * Ensures an integer index `m_index` is less than `m_size` and greater than or equal to 0.
  * If not, the current function returns.
  */
-#define ERR_FAIL_INDEX(m_index, m_size)                                                                         \
-	if (unlikely((m_index) < 0 || (m_index) >= (m_size))) {                                                     \
+#define ERR_FAIL_INDEX(m_index, m_size) \
+	if (unlikely((m_index) < 0 || (m_index) >= (m_size))) { \
 		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size)); \
-		return;                                                                                                 \
-	} else                                                                                                      \
+		return; \
+	} else \
 		((void)0)
 
 /**
  * Ensures an integer index `m_index` is less than `m_size` and greater than or equal to 0.
  * If not, prints `m_msg` and the current function returns.
  */
-#define ERR_FAIL_INDEX_MSG(m_index, m_size, m_msg)                                                                     \
-	if (unlikely((m_index) < 0 || (m_index) >= (m_size))) {                                                            \
+#define ERR_FAIL_INDEX_MSG(m_index, m_size, m_msg) \
+	if (unlikely((m_index) < 0 || (m_index) >= (m_size))) { \
 		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size), m_msg); \
-		return;                                                                                                        \
-	} else                                                                                                             \
+		return; \
+	} else \
 		((void)0)
 
 /**
- * Ensures an integer index `m_index` is less than `m_size` and greater than or equal to 0.
- * If not, prints `m_msg`, notifies in the editor, and the current function returns.
+ * Same as `ERR_FAIL_INDEX_MSG` but also notifies the editor.
  */
-#define ERR_FAIL_INDEX_EDMSG(m_index, m_size, m_msg)                                                                         \
-	if (unlikely((m_index) < 0 || (m_index) >= (m_size))) {                                                                  \
+#define ERR_FAIL_INDEX_EDMSG(m_index, m_size, m_msg) \
+	if (unlikely((m_index) < 0 || (m_index) >= (m_size))) { \
 		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size), m_msg, true); \
-		return;                                                                                                              \
-	} else                                                                                                                   \
+		return; \
+	} else \
 		((void)0)
 
 /**
@@ -153,33 +183,32 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * Ensures an integer index `m_index` is less than `m_size` and greater than or equal to 0.
  * If not, the current function returns `m_retval`.
  */
-#define ERR_FAIL_INDEX_V(m_index, m_size, m_retval)                                                             \
-	if (unlikely((m_index) < 0 || (m_index) >= (m_size))) {                                                     \
+#define ERR_FAIL_INDEX_V(m_index, m_size, m_retval) \
+	if (unlikely((m_index) < 0 || (m_index) >= (m_size))) { \
 		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size)); \
-		return m_retval;                                                                                        \
-	} else                                                                                                      \
+		return m_retval; \
+	} else \
 		((void)0)
 
 /**
  * Ensures an integer index `m_index` is less than `m_size` and greater than or equal to 0.
  * If not, prints `m_msg` and the current function returns `m_retval`.
  */
-#define ERR_FAIL_INDEX_V_MSG(m_index, m_size, m_retval, m_msg)                                                         \
-	if (unlikely((m_index) < 0 || (m_index) >= (m_size))) {                                                            \
+#define ERR_FAIL_INDEX_V_MSG(m_index, m_size, m_retval, m_msg) \
+	if (unlikely((m_index) < 0 || (m_index) >= (m_size))) { \
 		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size), m_msg); \
-		return m_retval;                                                                                               \
-	} else                                                                                                             \
+		return m_retval; \
+	} else \
 		((void)0)
 
 /**
- * Ensures an integer index `m_index` is less than `m_size` and greater than or equal to 0.
- * If not, prints `m_msg`, notifies in the editor, and the current function returns `m_retval`.
+ * Same as `ERR_FAIL_INDEX_V_MSG` but also notifies the editor.
  */
-#define ERR_FAIL_INDEX_V_EDMSG(m_index, m_size, m_retval, m_msg)                                                             \
-	if (unlikely((m_index) < 0 || (m_index) >= (m_size))) {                                                                  \
+#define ERR_FAIL_INDEX_V_EDMSG(m_index, m_size, m_retval, m_msg) \
+	if (unlikely((m_index) < 0 || (m_index) >= (m_size))) { \
 		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size), m_msg, true); \
-		return m_retval;                                                                                                     \
-	} else                                                                                                                   \
+		return m_retval; \
+	} else \
 		((void)0)
 
 /**
@@ -190,11 +219,12 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * Ensures an integer index `m_index` is less than `m_size` and greater than or equal to 0.
  * If not, the application crashes.
  */
-#define CRASH_BAD_INDEX(m_index, m_size)                                                                                  \
-	if (unlikely((m_index) < 0 || (m_index) >= (m_size))) {                                                               \
-		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size), "", true); \
-		GENERATE_TRAP();                                                                                                  \
-	} else                                                                                                                \
+#define CRASH_BAD_INDEX(m_index, m_size) \
+	if (unlikely((m_index) < 0 || (m_index) >= (m_size))) { \
+		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size), "", false, true); \
+		_err_flush_stdout(); \
+		GENERATE_TRAP(); \
+	} else \
 		((void)0)
 
 /**
@@ -204,11 +234,12 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * Ensures an integer index `m_index` is less than `m_size` and greater than or equal to 0.
  * If not, prints `m_msg` and the application crashes.
  */
-#define CRASH_BAD_INDEX_MSG(m_index, m_size, m_msg)                                                                          \
-	if (unlikely((m_index) < 0 || (m_index) >= (m_size))) {                                                                  \
-		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size), m_msg, true); \
-		GENERATE_TRAP();                                                                                                     \
-	} else                                                                                                                   \
+#define CRASH_BAD_INDEX_MSG(m_index, m_size, m_msg) \
+	if (unlikely((m_index) < 0 || (m_index) >= (m_size))) { \
+		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size), m_msg, false, true); \
+		_err_flush_stdout(); \
+		GENERATE_TRAP(); \
+	} else \
 		((void)0)
 
 // Unsigned integer index out of bounds error macros.
@@ -220,32 +251,32 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * Ensures an unsigned integer index `m_index` is less than `m_size`.
  * If not, the current function returns.
  */
-#define ERR_FAIL_UNSIGNED_INDEX(m_index, m_size)                                                                \
-	if (unlikely((m_index) >= (m_size))) {                                                                      \
+#define ERR_FAIL_UNSIGNED_INDEX(m_index, m_size) \
+	if (unlikely((m_index) >= (m_size))) { \
 		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size)); \
-		return;                                                                                                 \
-	} else                                                                                                      \
+		return; \
+	} else \
 		((void)0)
 
 /**
  * Ensures an unsigned integer index `m_index` is less than `m_size`.
  * If not, prints `m_msg` and the current function returns.
  */
-#define ERR_FAIL_UNSIGNED_INDEX_MSG(m_index, m_size, m_msg)                                                            \
-	if (unlikely((m_index) >= (m_size))) {                                                                             \
+#define ERR_FAIL_UNSIGNED_INDEX_MSG(m_index, m_size, m_msg) \
+	if (unlikely((m_index) >= (m_size))) { \
 		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size), m_msg); \
-		return;                                                                                                        \
-	} else                                                                                                             \
+		return; \
+	} else \
 		((void)0)
+
 /**
- * Ensures an unsigned integer index `m_index` is less than `m_size`.
- * If not, prints `m_msg`, notifies in the editor, and the current function returns.
+ * Same as `ERR_FAIL_UNSIGNED_INDEX_MSG` but also notifies the editor.
  */
-#define ERR_FAIL_UNSIGNED_INDEX_EDMSG(m_index, m_size, m_msg)                                                                \
-	if (unlikely((m_index) >= (m_size))) {                                                                                   \
+#define ERR_FAIL_UNSIGNED_INDEX_EDMSG(m_index, m_size, m_msg) \
+	if (unlikely((m_index) >= (m_size))) { \
 		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size), m_msg, true); \
-		return;                                                                                                              \
-	} else                                                                                                                   \
+		return; \
+	} else \
 		((void)0)
 
 /**
@@ -255,33 +286,32 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * Ensures an unsigned integer index `m_index` is less than `m_size`.
  * If not, the current function returns `m_retval`.
  */
-#define ERR_FAIL_UNSIGNED_INDEX_V(m_index, m_size, m_retval)                                                    \
-	if (unlikely((m_index) >= (m_size))) {                                                                      \
+#define ERR_FAIL_UNSIGNED_INDEX_V(m_index, m_size, m_retval) \
+	if (unlikely((m_index) >= (m_size))) { \
 		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size)); \
-		return m_retval;                                                                                        \
-	} else                                                                                                      \
+		return m_retval; \
+	} else \
 		((void)0)
 
 /**
  * Ensures an unsigned integer index `m_index` is less than `m_size`.
  * If not, prints `m_msg` and the current function returns `m_retval`.
  */
-#define ERR_FAIL_UNSIGNED_INDEX_V_MSG(m_index, m_size, m_retval, m_msg)                                                \
-	if (unlikely((m_index) >= (m_size))) {                                                                             \
+#define ERR_FAIL_UNSIGNED_INDEX_V_MSG(m_index, m_size, m_retval, m_msg) \
+	if (unlikely((m_index) >= (m_size))) { \
 		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size), m_msg); \
-		return m_retval;                                                                                               \
-	} else                                                                                                             \
+		return m_retval; \
+	} else \
 		((void)0)
 
 /**
- * Ensures an unsigned integer index `m_index` is less than `m_size`.
- * If not, prints `m_msg`, notifies in the editor, and the current function returns `m_retval`.
+ * Same as `ERR_FAIL_UNSIGNED_INDEX_V_MSG` but also notifies the editor.
  */
-#define ERR_FAIL_UNSIGNED_INDEX_V_EDMSG(m_index, m_size, m_retval, m_msg)                                                    \
-	if (unlikely((m_index) >= (m_size))) {                                                                                   \
+#define ERR_FAIL_UNSIGNED_INDEX_V_EDMSG(m_index, m_size, m_retval, m_msg) \
+	if (unlikely((m_index) >= (m_size))) { \
 		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size), m_msg, true); \
-		return m_retval;                                                                                                     \
-	} else                                                                                                                   \
+		return m_retval; \
+	} else \
 		((void)0)
 
 /**
@@ -292,11 +322,12 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * Ensures an unsigned integer index `m_index` is less than `m_size`.
  * If not, the application crashes.
  */
-#define CRASH_BAD_UNSIGNED_INDEX(m_index, m_size)                                                                         \
-	if (unlikely((m_index) >= (m_size))) {                                                                                \
-		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size), "", true); \
-		GENERATE_TRAP();                                                                                                  \
-	} else                                                                                                                \
+#define CRASH_BAD_UNSIGNED_INDEX(m_index, m_size) \
+	if (unlikely((m_index) >= (m_size))) { \
+		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size), "", false, true); \
+		_err_flush_stdout(); \
+		GENERATE_TRAP(); \
+	} else \
 		((void)0)
 
 /**
@@ -306,11 +337,12 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * Ensures an unsigned integer index `m_index` is less than `m_size`.
  * If not, prints `m_msg` and the application crashes.
  */
-#define CRASH_BAD_UNSIGNED_INDEX_MSG(m_index, m_size, m_msg)                                                                 \
-	if (unlikely((m_index) >= (m_size))) {                                                                                   \
-		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size), m_msg, true); \
-		GENERATE_TRAP();                                                                                                     \
-	} else                                                                                                                   \
+#define CRASH_BAD_UNSIGNED_INDEX_MSG(m_index, m_size, m_msg) \
+	if (unlikely((m_index) >= (m_size))) { \
+		_err_print_index_error(FUNCTION_STR, __FILE__, __LINE__, m_index, m_size, _STR(m_index), _STR(m_size), m_msg, false, true); \
+		_err_flush_stdout(); \
+		GENERATE_TRAP(); \
+	} else \
 		((void)0)
 
 // Null reference error macros.
@@ -322,33 +354,32 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * Ensures a pointer `m_param` is not null.
  * If it is null, the current function returns.
  */
-#define ERR_FAIL_NULL(m_param)                                                                          \
-	if (unlikely(m_param == nullptr)) {                                                                 \
+#define ERR_FAIL_NULL(m_param) \
+	if (unlikely(m_param == nullptr)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Parameter \"" _STR(m_param) "\" is null."); \
-		return;                                                                                         \
-	} else                                                                                              \
+		return; \
+	} else \
 		((void)0)
 
 /**
  * Ensures a pointer `m_param` is not null.
  * If it is null, prints `m_msg` and the current function returns.
  */
-#define ERR_FAIL_NULL_MSG(m_param, m_msg)                                                                      \
-	if (unlikely(m_param == nullptr)) {                                                                        \
+#define ERR_FAIL_NULL_MSG(m_param, m_msg) \
+	if (unlikely(m_param == nullptr)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Parameter \"" _STR(m_param) "\" is null.", m_msg); \
-		return;                                                                                                \
-	} else                                                                                                     \
+		return; \
+	} else \
 		((void)0)
 
 /**
- * Ensures a pointer `m_param` is not null.
- * If it is null, prints `m_msg`, notifies in the editor, and the current function returns.
+ * Same as `ERR_FAIL_NULL_MSG` but also notifies the editor.
  */
-#define ERR_FAIL_NULL_EDMSG(m_param, m_msg)                                                                          \
-	if (unlikely(m_param == nullptr)) {                                                                              \
+#define ERR_FAIL_NULL_EDMSG(m_param, m_msg) \
+	if (unlikely(m_param == nullptr)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Parameter \"" _STR(m_param) "\" is null.", m_msg, true); \
-		return;                                                                                                      \
-	} else                                                                                                           \
+		return; \
+	} else \
 		((void)0)
 
 /**
@@ -358,33 +389,32 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * Ensures a pointer `m_param` is not null.
  * If it is null, the current function returns `m_retval`.
  */
-#define ERR_FAIL_NULL_V(m_param, m_retval)                                                              \
-	if (unlikely(m_param == nullptr)) {                                                                 \
+#define ERR_FAIL_NULL_V(m_param, m_retval) \
+	if (unlikely(m_param == nullptr)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Parameter \"" _STR(m_param) "\" is null."); \
-		return m_retval;                                                                                \
-	} else                                                                                              \
+		return m_retval; \
+	} else \
 		((void)0)
 
 /**
  * Ensures a pointer `m_param` is not null.
  * If it is null, prints `m_msg` and the current function returns `m_retval`.
  */
-#define ERR_FAIL_NULL_V_MSG(m_param, m_retval, m_msg)                                                          \
-	if (unlikely(m_param == nullptr)) {                                                                        \
+#define ERR_FAIL_NULL_V_MSG(m_param, m_retval, m_msg) \
+	if (unlikely(m_param == nullptr)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Parameter \"" _STR(m_param) "\" is null.", m_msg); \
-		return m_retval;                                                                                       \
-	} else                                                                                                     \
+		return m_retval; \
+	} else \
 		((void)0)
 
 /**
- * Ensures a pointer `m_param` is not null.
- * If it is null, prints `m_msg`, notifies in the editor, and the current function returns `m_retval`.
+ * Same as `ERR_FAIL_NULL_V_MSG` but also notifies the editor.
  */
-#define ERR_FAIL_NULL_V_EDMSG(m_param, m_retval, m_msg)                                                              \
-	if (unlikely(m_param == nullptr)) {                                                                              \
+#define ERR_FAIL_NULL_V_EDMSG(m_param, m_retval, m_msg) \
+	if (unlikely(m_param == nullptr)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Parameter \"" _STR(m_param) "\" is null.", m_msg, true); \
-		return m_retval;                                                                                             \
-	} else                                                                                                           \
+		return m_retval; \
+	} else \
 		((void)0)
 
 /**
@@ -396,11 +426,11 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * Ensures `m_cond` is false.
  * If `m_cond` is true, the current function returns.
  */
-#define ERR_FAIL_COND(m_cond)                                                                          \
-	if (unlikely(m_cond)) {                                                                            \
+#define ERR_FAIL_COND(m_cond) \
+	if (unlikely(m_cond)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Condition \"" _STR(m_cond) "\" is true."); \
-		return;                                                                                        \
-	} else                                                                                             \
+		return; \
+	} else \
 		((void)0)
 
 /**
@@ -410,25 +440,21 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * If checking for null use ERR_FAIL_NULL_MSG instead.
  * If checking index bounds use ERR_FAIL_INDEX_MSG instead.
  */
-#define ERR_FAIL_COND_MSG(m_cond, m_msg)                                                                      \
-	if (unlikely(m_cond)) {                                                                                   \
+#define ERR_FAIL_COND_MSG(m_cond, m_msg) \
+	if (unlikely(m_cond)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Condition \"" _STR(m_cond) "\" is true.", m_msg); \
-		return;                                                                                               \
-	} else                                                                                                    \
+		return; \
+	} else \
 		((void)0)
 
 /**
- * Ensures `m_cond` is false.
- * If `m_cond` is true, prints `m_msg`, notifies in the editor, and the current function returns.
- *
- * If checking for null use ERR_FAIL_NULL_MSG instead.
- * If checking index bounds use ERR_FAIL_INDEX_MSG instead.
+ * Same as `ERR_FAIL_COND_MSG` but also notifies the editor.
  */
-#define ERR_FAIL_COND_EDMSG(m_cond, m_msg)                                                                          \
-	if (unlikely(m_cond)) {                                                                                         \
+#define ERR_FAIL_COND_EDMSG(m_cond, m_msg) \
+	if (unlikely(m_cond)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Condition \"" _STR(m_cond) "\" is true.", m_msg, true); \
-		return;                                                                                                     \
-	} else                                                                                                          \
+		return; \
+	} else \
 		((void)0)
 
 /**
@@ -440,11 +466,11 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * Ensures `m_cond` is false.
  * If `m_cond` is true, the current function returns `m_retval`.
  */
-#define ERR_FAIL_COND_V(m_cond, m_retval)                                                                                         \
-	if (unlikely(m_cond)) {                                                                                                       \
+#define ERR_FAIL_COND_V(m_cond, m_retval) \
+	if (unlikely(m_cond)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Condition \"" _STR(m_cond) "\" is true. Returning: " _STR(m_retval)); \
-		return m_retval;                                                                                                          \
-	} else                                                                                                                        \
+		return m_retval; \
+	} else \
 		((void)0)
 
 /**
@@ -454,25 +480,21 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * If checking for null use ERR_FAIL_NULL_V_MSG instead.
  * If checking index bounds use ERR_FAIL_INDEX_V_MSG instead.
  */
-#define ERR_FAIL_COND_V_MSG(m_cond, m_retval, m_msg)                                                                                     \
-	if (unlikely(m_cond)) {                                                                                                              \
+#define ERR_FAIL_COND_V_MSG(m_cond, m_retval, m_msg) \
+	if (unlikely(m_cond)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Condition \"" _STR(m_cond) "\" is true. Returning: " _STR(m_retval), m_msg); \
-		return m_retval;                                                                                                                 \
-	} else                                                                                                                               \
+		return m_retval; \
+	} else \
 		((void)0)
 
 /**
- * Ensures `m_cond` is false.
- * If `m_cond` is true, prints `m_msg`, notifies in the editor, and the current function returns `m_retval`.
- *
- * If checking for null use ERR_FAIL_NULL_V_MSG instead.
- * If checking index bounds use ERR_FAIL_INDEX_V_MSG instead.
+ * Same as `ERR_FAIL_COND_V_MSG` but also notifies the editor.
  */
-#define ERR_FAIL_COND_V_EDMSG(m_cond, m_retval, m_msg)                                                                                         \
-	if (unlikely(m_cond)) {                                                                                                                    \
+#define ERR_FAIL_COND_V_EDMSG(m_cond, m_retval, m_msg) \
+	if (unlikely(m_cond)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Condition \"" _STR(m_cond) "\" is true. Returning: " _STR(m_retval), m_msg, true); \
-		return m_retval;                                                                                                                       \
-	} else                                                                                                                                     \
+		return m_retval; \
+	} else \
 		((void)0)
 
 /**
@@ -482,33 +504,32 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * Ensures `m_cond` is false.
  * If `m_cond` is true, the current loop continues.
  */
-#define ERR_CONTINUE(m_cond)                                                                                       \
-	if (unlikely(m_cond)) {                                                                                        \
+#define ERR_CONTINUE(m_cond) \
+	if (unlikely(m_cond)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Condition \"" _STR(m_cond) "\" is true. Continuing."); \
-		continue;                                                                                                  \
-	} else                                                                                                         \
+		continue; \
+	} else \
 		((void)0)
 
 /**
  * Ensures `m_cond` is false.
  * If `m_cond` is true, prints `m_msg` and the current loop continues.
  */
-#define ERR_CONTINUE_MSG(m_cond, m_msg)                                                                                   \
-	if (unlikely(m_cond)) {                                                                                               \
+#define ERR_CONTINUE_MSG(m_cond, m_msg) \
+	if (unlikely(m_cond)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Condition \"" _STR(m_cond) "\" is true. Continuing.", m_msg); \
-		continue;                                                                                                         \
-	} else                                                                                                                \
+		continue; \
+	} else \
 		((void)0)
 
 /**
- * Ensures `m_cond` is false.
- * If `m_cond` is true, prints `m_msg`, notifies in the editor, and the current loop continues.
+ * Same as `ERR_CONTINUE_MSG` but also notifies the editor.
  */
-#define ERR_CONTINUE_EDMSG(m_cond, m_msg)                                                                                       \
-	if (unlikely(m_cond)) {                                                                                                     \
+#define ERR_CONTINUE_EDMSG(m_cond, m_msg) \
+	if (unlikely(m_cond)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Condition \"" _STR(m_cond) "\" is true. Continuing.", m_msg, true); \
-		continue;                                                                                                               \
-	} else                                                                                                                      \
+		continue; \
+	} else \
 		((void)0)
 
 /**
@@ -518,33 +539,32 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * Ensures `m_cond` is false.
  * If `m_cond` is true, the current loop breaks.
  */
-#define ERR_BREAK(m_cond)                                                                                        \
-	if (unlikely(m_cond)) {                                                                                      \
+#define ERR_BREAK(m_cond) \
+	if (unlikely(m_cond)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Condition \"" _STR(m_cond) "\" is true. Breaking."); \
-		break;                                                                                                   \
-	} else                                                                                                       \
+		break; \
+	} else \
 		((void)0)
 
 /**
  * Ensures `m_cond` is false.
  * If `m_cond` is true, prints `m_msg` and the current loop breaks.
  */
-#define ERR_BREAK_MSG(m_cond, m_msg)                                                                                    \
-	if (unlikely(m_cond)) {                                                                                             \
+#define ERR_BREAK_MSG(m_cond, m_msg) \
+	if (unlikely(m_cond)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Condition \"" _STR(m_cond) "\" is true. Breaking.", m_msg); \
-		break;                                                                                                          \
-	} else                                                                                                              \
+		break; \
+	} else \
 		((void)0)
 
 /**
- * Ensures `m_cond` is false.
- * If `m_cond` is true, prints `m_msg`, notifies in the editor, and the current loop breaks.
+ * Same as `ERR_BREAK_MSG` but also notifies the editor.
  */
-#define ERR_BREAK_EDMSG(m_cond, m_msg)                                                                                        \
-	if (unlikely(m_cond)) {                                                                                                   \
+#define ERR_BREAK_EDMSG(m_cond, m_msg) \
+	if (unlikely(m_cond)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Condition \"" _STR(m_cond) "\" is true. Breaking.", m_msg, true); \
-		break;                                                                                                                \
-	} else                                                                                                                    \
+		break; \
+	} else \
 		((void)0)
 
 /**
@@ -555,11 +575,12 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * Ensures `m_cond` is false.
  * If `m_cond` is true, the application crashes.
  */
-#define CRASH_COND(m_cond)                                                                                    \
-	if (unlikely(m_cond)) {                                                                                   \
+#define CRASH_COND(m_cond) \
+	if (unlikely(m_cond)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "FATAL: Condition \"" _STR(m_cond) "\" is true."); \
-		GENERATE_TRAP();                                                                                      \
-	} else                                                                                                    \
+		_err_flush_stdout(); \
+		GENERATE_TRAP(); \
+	} else \
 		((void)0)
 
 /**
@@ -569,11 +590,12 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  * Ensures `m_cond` is false.
  * If `m_cond` is true, prints `m_msg` and the application crashes.
  */
-#define CRASH_COND_MSG(m_cond, m_msg)                                                                                \
-	if (unlikely(m_cond)) {                                                                                          \
+#define CRASH_COND_MSG(m_cond, m_msg) \
+	if (unlikely(m_cond)) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "FATAL: Condition \"" _STR(m_cond) "\" is true.", m_msg); \
-		GENERATE_TRAP();                                                                                             \
-	} else                                                                                                           \
+		_err_flush_stdout(); \
+		GENERATE_TRAP(); \
+	} else \
 		((void)0)
 
 // Generic error macros.
@@ -585,11 +607,11 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  *
  * The current function returns.
  */
-#define ERR_FAIL()                                                                     \
-	if (true) {                                                                        \
+#define ERR_FAIL() \
+	if (true) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Method/function failed."); \
-		return;                                                                        \
-	} else                                                                             \
+		return; \
+	} else \
 		((void)0)
 
 /**
@@ -598,24 +620,21 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  *
  * Prints `m_msg`, and the current function returns.
  */
-#define ERR_FAIL_MSG(m_msg)                                                                   \
-	if (true) {                                                                               \
+#define ERR_FAIL_MSG(m_msg) \
+	if (true) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Method/function failed.", m_msg); \
-		return;                                                                               \
-	} else                                                                                    \
+		return; \
+	} else \
 		((void)0)
 
 /**
- * Try using `ERR_FAIL_COND_MSG`.
- * Only use this macro if more complex error detection or recovery is required.
- *
- * Prints `m_msg`, notifies in the editor, and the current function returns.
+ * Same as `ERR_FAIL_MSG` but also notifies the editor.
  */
-#define ERR_FAIL_EDMSG(m_msg)                                                                       \
-	if (true) {                                                                                     \
+#define ERR_FAIL_EDMSG(m_msg) \
+	if (true) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Method/function failed.", m_msg, true); \
-		return;                                                                                     \
-	} else                                                                                          \
+		return; \
+	} else \
 		((void)0)
 
 /**
@@ -625,11 +644,11 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  *
  * The current function returns `m_retval`.
  */
-#define ERR_FAIL_V(m_retval)                                                                                      \
-	if (true) {                                                                                                   \
+#define ERR_FAIL_V(m_retval) \
+	if (true) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Method/function failed. Returning: " _STR(m_retval)); \
-		return m_retval;                                                                                          \
-	} else                                                                                                        \
+		return m_retval; \
+	} else \
 		((void)0)
 
 /**
@@ -638,28 +657,25 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  *
  * Prints `m_msg`, and the current function returns `m_retval`.
  */
-#define ERR_FAIL_V_MSG(m_retval, m_msg)                                                                                  \
-	if (true) {                                                                                                          \
+#define ERR_FAIL_V_MSG(m_retval, m_msg) \
+	if (true) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Method/function failed. Returning: " _STR(m_retval), m_msg); \
-		return m_retval;                                                                                                 \
-	} else                                                                                                               \
+		return m_retval; \
+	} else \
 		((void)0)
 
 /**
- * Try using `ERR_FAIL_COND_V_MSG`.
- * Only use this macro if more complex error detection or recovery is required.
- *
- * Prints `m_msg`, notifies in the editor, and the current function returns `m_retval`.
+ * Same as `ERR_FAIL_V_MSG` but also notifies the editor.
  */
-#define ERR_FAIL_V_EDMSG(m_retval, m_msg)                                                                                      \
-	if (true) {                                                                                                                \
+#define ERR_FAIL_V_EDMSG(m_retval, m_msg) \
+	if (true) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "Method/function failed. Returning: " _STR(m_retval), m_msg, true); \
-		return m_retval;                                                                                                       \
-	} else                                                                                                                     \
+		return m_retval; \
+	} else \
 		((void)0)
 
 /**
- * Try using `ERR_FAIL_COND_MSG`, `ERR_FAIL_COND_V_MSG`, `ERR_CONTINUE_MSG` or ERR_BREAK_MSG.
+ * Try using `ERR_FAIL_COND_MSG`, `ERR_FAIL_COND_V_MSG`, `ERR_CONTINUE_MSG` or `ERR_BREAK_MSG`.
  * Only use this macro at the start of a function that has not been implemented yet, or
  * if more complex error detection or recovery is required.
  *
@@ -669,39 +685,35 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
 	_err_print_error(FUNCTION_STR, __FILE__, __LINE__, m_msg)
 
 /**
- * Try using `ERR_FAIL_COND_MSG`, `ERR_FAIL_COND_V_MSG`, `ERR_CONTINUE_MSG` or ERR_BREAK_MSG.
- * Only use this macro at the start of a function that has not been implemented yet, or
- * if more complex error detection or recovery is required.
- *
- * Prints `m_msg` and notifies the editor.
+ * Same as `ERR_PRINT` but also notifies the editor.
  */
 #define ERR_PRINT_ED(m_msg) \
-	_err_print_error(FUNCTION_STR, __FILE__, __LINE__, m_msg, )
+	_err_print_error(FUNCTION_STR, __FILE__, __LINE__, m_msg, true)
 
 /**
  * Prints `m_msg` once during the application lifetime.
  */
-#define ERR_PRINT_ONCE(m_msg)                                          \
-	if (true) {                                                        \
-		static bool first_print = true;                                \
-		if (first_print) {                                             \
+#define ERR_PRINT_ONCE(m_msg) \
+	if (true) { \
+		static bool warning_shown = false; \
+		if (unlikely(!warning_shown)) { \
+			warning_shown = true; \
 			_err_print_error(FUNCTION_STR, __FILE__, __LINE__, m_msg); \
-			first_print = false;                                       \
-		}                                                              \
-	} else                                                             \
+		} \
+	} else \
 		((void)0)
 
 /**
- * Prints `m_msg` and notifies the editor once during the application lifetime.
+ * Same as `ERR_PRINT_ONCE` but also notifies the editor.
  */
-#define ERR_PRINT_ONCE_ED(m_msg)                                             \
-	if (true) {                                                              \
-		static bool first_print = true;                                      \
-		if (first_print) {                                                   \
+#define ERR_PRINT_ONCE_ED(m_msg) \
+	if (true) { \
+		static bool warning_shown = false; \
+		if (unlikely(!warning_shown)) { \
+			warning_shown = true; \
 			_err_print_error(FUNCTION_STR, __FILE__, __LINE__, m_msg, true); \
-			first_print = false;                                             \
-		}                                                                    \
-	} else                                                                   \
+		} \
+	} else \
 		((void)0)
 
 // Print warning message macros.
@@ -715,9 +727,7 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
 	_err_print_error(FUNCTION_STR, __FILE__, __LINE__, m_msg, false, ERR_HANDLER_WARNING)
 
 /**
- * Prints `m_msg` and notifies the editor.
- *
- * If warning about deprecated usage, use `WARN_DEPRECATED` or `WARN_DEPRECATED_MSG` instead.
+ * Same as `WARN_PRINT` but also notifies the editor.
  */
 #define WARN_PRINT_ED(m_msg) \
 	_err_print_error(FUNCTION_STR, __FILE__, __LINE__, m_msg, true, ERR_HANDLER_WARNING)
@@ -727,57 +737,65 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  *
  * If warning about deprecated usage, use `WARN_DEPRECATED` or `WARN_DEPRECATED_MSG` instead.
  */
-#define WARN_PRINT_ONCE(m_msg)                                                                     \
-	if (true) {                                                                                    \
-		static bool first_print = true;                                                            \
-		if (first_print) {                                                                         \
+#define WARN_PRINT_ONCE(m_msg) \
+	if (true) { \
+		static bool warning_shown = false; \
+		if (unlikely(!warning_shown)) { \
+			warning_shown = true; \
 			_err_print_error(FUNCTION_STR, __FILE__, __LINE__, m_msg, false, ERR_HANDLER_WARNING); \
-			first_print = false;                                                                   \
-		}                                                                                          \
-	} else                                                                                         \
+		} \
+	} else \
 		((void)0)
 
 /**
- * Prints `m_msg` and notifies the editor once during the application lifetime.
- *
- * If warning about deprecated usage, use `WARN_DEPRECATED` or `WARN_DEPRECATED_MSG` instead.
+ * Same as `WARN_PRINT_ONCE` but also notifies the editor.
  */
-#define WARN_PRINT_ONCE_ED(m_msg)                                                                 \
-	if (true) {                                                                                   \
-		static bool first_print = true;                                                           \
-		if (first_print) {                                                                        \
+#define WARN_PRINT_ONCE_ED(m_msg) \
+	if (true) { \
+		static bool warning_shown = false; \
+		if (unlikely(!warning_shown)) { \
+			warning_shown = true; \
 			_err_print_error(FUNCTION_STR, __FILE__, __LINE__, m_msg, true, ERR_HANDLER_WARNING); \
-			first_print = false;                                                                  \
-		}                                                                                         \
-	} else                                                                                        \
+		} \
+	} else \
 		((void)0)
+
+/**
+ * Warns about `m_msg` only when verbose mode is enabled.
+ */
+#define WARN_VERBOSE(m_msg) \
+	{ \
+		if (is_print_verbose_enabled()) { \
+			WARN_PRINT(m_msg); \
+		} \
+	}
 
 // Print deprecated warning message macros.
 
 /**
  * Warns that the current function is deprecated.
  */
-#define WARN_DEPRECATED                                                                                                                                           \
-	if (true) {                                                                                                                                                   \
-		static SafeFlag warning_shown;                                                                                                                            \
-		if (!warning_shown.is_set()) {                                                                                                                            \
+#define WARN_DEPRECATED \
+	if (true) { \
+		static bool warning_shown = false; \
+		if (unlikely(!warning_shown)) { \
+			warning_shown = true; \
 			_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "This method has been deprecated and will be removed in the future.", false, ERR_HANDLER_WARNING); \
-			warning_shown.set();                                                                                                                                  \
-		}                                                                                                                                                         \
-	} else                                                                                                                                                        \
+		} \
+	} else \
 		((void)0)
 
 /**
  * Warns that the current function is deprecated and prints `m_msg`.
  */
-#define WARN_DEPRECATED_MSG(m_msg)                                                                                                                                       \
-	if (true) {                                                                                                                                                          \
-		static SafeFlag warning_shown;                                                                                                                                   \
-		if (!warning_shown.is_set()) {                                                                                                                                   \
+#define WARN_DEPRECATED_MSG(m_msg) \
+	if (true) { \
+		static bool warning_shown = false; \
+		if (unlikely(!warning_shown)) { \
+			warning_shown = true; \
 			_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "This method has been deprecated and will be removed in the future.", m_msg, false, ERR_HANDLER_WARNING); \
-			warning_shown.set();                                                                                                                                         \
-		}                                                                                                                                                                \
-	} else                                                                                                                                                               \
+		} \
+	} else \
 		((void)0)
 
 /**
@@ -786,11 +804,12 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  *
  * The application crashes.
  */
-#define CRASH_NOW()                                                                           \
-	if (true) {                                                                               \
+#define CRASH_NOW() \
+	if (true) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "FATAL: Method/function failed."); \
-		GENERATE_TRAP();                                                                      \
-	} else                                                                                    \
+		_err_flush_stdout(); \
+		GENERATE_TRAP(); \
+	} else \
 		((void)0)
 
 /**
@@ -798,11 +817,61 @@ void _err_print_index_error(const char *p_function, const char *p_file, int p_li
  *
  * Prints `m_msg`, and then the application crashes.
  */
-#define CRASH_NOW_MSG(m_msg)                                                                         \
-	if (true) {                                                                                      \
+#define CRASH_NOW_MSG(m_msg) \
+	if (true) { \
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "FATAL: Method/function failed.", m_msg); \
-		GENERATE_TRAP();                                                                             \
-	} else                                                                                           \
+		_err_flush_stdout(); \
+		GENERATE_TRAP(); \
+	} else \
 		((void)0)
 
-#endif // ERROR_MACROS_H
+/**
+ * Note: IN MOST CASES YOU SHOULD NOT USE THIS MACRO.
+ * Do not use unless you understand the trade-offs.
+ *
+ * DEV macros will be compiled out in releases, they are wrapped in DEV_ENABLED.
+ *
+ * Prefer WARNINGS / ERR_FAIL macros (which fail without crashing) - ERR_FAIL should be used in most cases.
+ * Then CRASH_NOW_MSG macros (on rare occasions where error cannot be recovered).
+ *
+ * DEV_ASSERT should generally only be used when both of the following conditions are met:
+ * 1) Bottleneck code where a check in release would be too expensive.
+ * 2) Situations where the check would fail obviously and straight away during the maintenance of the code
+ *    (i.e. strict conditions that should be true no matter what)
+ *    and that can't fail for other contributors once the code is finished and merged.
+ */
+#ifdef DEV_ENABLED
+#define DEV_ASSERT(m_cond) \
+	if (unlikely(!(m_cond))) { \
+		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "FATAL: DEV_ASSERT failed  \"" _STR(m_cond) "\" is false."); \
+		_err_flush_stdout(); \
+		GENERATE_TRAP(); \
+	} else \
+		((void)0)
+#else
+#define DEV_ASSERT(m_cond)
+#endif
+
+#ifdef DEV_ENABLED
+#define DEV_CHECK_ONCE(m_cond) \
+	if (true) { \
+		static bool first_print = true; \
+		if (first_print && unlikely(!(m_cond))) { \
+			_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "DEV_CHECK_ONCE failed  \"" _STR(m_cond) "\" is false."); \
+			first_print = false; \
+		} \
+	} else \
+		((void)0)
+#else
+#define DEV_CHECK_ONCE(m_cond)
+#endif
+
+/**
+ * Physics Interpolation warnings.
+ * These are spam protection warnings.
+ */
+#define PHYSICS_INTERPOLATION_NODE_WARNING(m_object_id, m_string) \
+	_physics_interpolation_warning(FUNCTION_STR, __FILE__, __LINE__, m_object_id, m_string)
+
+#define PHYSICS_INTERPOLATION_WARNING(m_string) \
+	_physics_interpolation_warning(FUNCTION_STR, __FILE__, __LINE__, ObjectID((uint64_t)UINT64_MAX), m_string)

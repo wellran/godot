@@ -76,7 +76,7 @@ public:
      * @return          The class ID for all objects of this class.
      * @stable ICU 4.0
      */
-    static UClassID U_EXPORT2 getStaticClassID(void);
+    static UClassID U_EXPORT2 getStaticClassID();
 
     /**
      * Returns a unique class ID POLYMORPHICALLY. Pure virtual override. This
@@ -89,9 +89,8 @@ public:
      *                  other classes have different class IDs.
      * @stable ICU 4.0
      */
-    virtual UClassID getDynamicClassID(void) const override;
+    virtual UClassID getDynamicClassID() const override;
 
-    
     /**
      * Copy constructor.
      * @stable ICU 4.0
@@ -102,7 +101,7 @@ public:
      * Default assignment operator
      * @stable ICU 4.0
      */
-    DateInterval& operator=(const DateInterval&);
+    DateInterval& operator=(const DateInterval&) U_LIFETIME_BOUND;
 
     /**
      * Equality operator.
@@ -131,7 +130,7 @@ private:
     /** 
      * Default constructor, not implemented.
      */
-    DateInterval();
+    DateInterval() = delete;
 
     UDate fromDate;
     UDate toDate;

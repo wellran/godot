@@ -79,7 +79,7 @@ public:
     /**
      * Appends a string.
      * The default implementation calls appendCodeUnit(char16_t) for each code unit.
-     * @param s string, must not be NULL if length!=0
+     * @param s string, must not be nullptr if length!=0
      * @param length string length, or -1 if NUL-terminated
      * @return true if the operation succeeded
      * @stable ICU 4.8
@@ -141,10 +141,11 @@ public:
      * @return a buffer with *resultCapacity>=minCapacity
      * @stable ICU 4.8
      */
-    virtual char16_t *getAppendBuffer(int32_t minCapacity,
-                                   int32_t desiredCapacityHint,
-                                   char16_t *scratch, int32_t scratchCapacity,
-                                   int32_t *resultCapacity);
+    virtual char16_t* getAppendBuffer(int32_t minCapacity,
+                                      int32_t desiredCapacityHint,
+                                      char16_t* scratch U_LIFETIME_BOUND,
+                                      int32_t scratchCapacity,
+                                      int32_t* resultCapacity) U_LIFETIME_BOUND;
 };
 
 /**
@@ -186,7 +187,7 @@ public:
 
     /**
      * Appends a string to the UnicodeString.
-     * @param s string, must not be NULL if length!=0
+     * @param s string, must not be nullptr if length!=0
      * @param length string length, or -1 if NUL-terminated
      * @return true if the operation succeeded
      * @stable ICU 4.8
@@ -223,10 +224,10 @@ public:
      * @return a buffer with *resultCapacity>=minCapacity
      * @stable ICU 4.8
      */
-    virtual char16_t *getAppendBuffer(int32_t minCapacity,
-                                   int32_t desiredCapacityHint,
-                                   char16_t *scratch, int32_t scratchCapacity,
-                                   int32_t *resultCapacity) override;
+    virtual char16_t* getAppendBuffer(int32_t minCapacity,
+                                      int32_t desiredCapacityHint,
+                                      char16_t* scratch U_LIFETIME_BOUND, int32_t scratchCapacity,
+                                      int32_t* resultCapacity) U_LIFETIME_BOUND override;
 
 private:
     UnicodeString &str;

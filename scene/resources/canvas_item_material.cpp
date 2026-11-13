@@ -1,45 +1,46 @@
-/*************************************************************************/
-/*  canvas_item_material.cpp                                             */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  canvas_item_material.cpp                                              */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
 #include "canvas_item_material.h"
 
+#include "core/object/callable_mp.h"
+#include "core/object/class_db.h"
 #include "core/version.h"
+#include "servers/rendering/rendering_server.h"
 
 Mutex CanvasItemMaterial::material_mutex;
-SelfList<CanvasItemMaterial>::List *CanvasItemMaterial::dirty_materials = nullptr;
-Map<CanvasItemMaterial::MaterialKey, CanvasItemMaterial::ShaderData> CanvasItemMaterial::shader_map;
+SelfList<CanvasItemMaterial>::List CanvasItemMaterial::dirty_materials;
+HashMap<CanvasItemMaterial::MaterialKey, CanvasItemMaterial::ShaderData, CanvasItemMaterial::MaterialKey> CanvasItemMaterial::shader_map;
 CanvasItemMaterial::ShaderNames *CanvasItemMaterial::shader_names = nullptr;
 
 void CanvasItemMaterial::init_shaders() {
-	dirty_materials = memnew(SelfList<CanvasItemMaterial>::List);
-
 	shader_names = memnew(ShaderNames);
 
 	shader_names->particles_anim_h_frames = "particles_anim_h_frames";
@@ -48,14 +49,13 @@ void CanvasItemMaterial::init_shaders() {
 }
 
 void CanvasItemMaterial::finish_shaders() {
-	memdelete(dirty_materials);
+	dirty_materials.clear();
+
 	memdelete(shader_names);
-	dirty_materials = nullptr;
+	shader_names = nullptr;
 }
 
 void CanvasItemMaterial::_update_shader() {
-	dirty_materials->remove(&element);
-
 	MaterialKey mk = _compute_key();
 	if (mk.key == current_key.key) {
 		return; //no update required in the end
@@ -65,7 +65,7 @@ void CanvasItemMaterial::_update_shader() {
 		shader_map[current_key].users--;
 		if (shader_map[current_key].users == 0) {
 			//deallocate shader, as it's no longer in use
-			RS::get_singleton()->free(shader_map[current_key].shader);
+			RS::get_singleton()->free_rid(shader_map[current_key].shader);
 			shader_map.erase(current_key);
 		}
 	}
@@ -81,7 +81,7 @@ void CanvasItemMaterial::_update_shader() {
 	//must create a shader!
 
 	// Add a comment to describe the shader origin (useful when converting to ShaderMaterial).
-	String code = "// NOTE: Shader automatically converted from " VERSION_NAME " " VERSION_FULL_CONFIG "'s CanvasItemMaterial.\n\n";
+	String code = "// NOTE: Shader automatically converted from " GODOT_VERSION_NAME " " GODOT_VERSION_FULL_CONFIG "'s CanvasItemMaterial.\n\n";
 
 	code += "shader_type canvas_item;\nrender_mode ";
 	switch (blend_mode) {
@@ -153,23 +153,22 @@ void CanvasItemMaterial::_update_shader() {
 void CanvasItemMaterial::flush_changes() {
 	MutexLock lock(material_mutex);
 
-	while (dirty_materials->first()) {
-		dirty_materials->first()->self()->_update_shader();
+	while (dirty_materials.first()) {
+		dirty_materials.first()->self()->_update_shader();
+		dirty_materials.first()->remove_from_list();
 	}
 }
 
 void CanvasItemMaterial::_queue_shader_change() {
-	MutexLock lock(material_mutex);
-
-	if (is_initialized && !element.in_list()) {
-		dirty_materials->add(&element);
+	if (!_is_initialized()) {
+		return;
 	}
-}
 
-bool CanvasItemMaterial::_is_shader_dirty() const {
 	MutexLock lock(material_mutex);
 
-	return element.in_list();
+	if (!element.in_list()) {
+		dirty_materials.add(&element);
+	}
 }
 
 void CanvasItemMaterial::set_blend_mode(BlendMode p_blend_mode) {
@@ -227,9 +226,9 @@ bool CanvasItemMaterial::get_particles_anim_loop() const {
 	return particles_anim_loop;
 }
 
-void CanvasItemMaterial::_validate_property(PropertyInfo &property) const {
-	if (property.name.begins_with("particles_anim_") && !particles_animation) {
-		property.usage = PROPERTY_USAGE_NONE;
+void CanvasItemMaterial::_validate_property(PropertyInfo &p_property) const {
+	if (p_property.name.begins_with("particles_anim_") && !particles_animation) {
+		p_property.usage = PROPERTY_USAGE_NONE;
 	}
 }
 
@@ -282,23 +281,27 @@ void CanvasItemMaterial::_bind_methods() {
 
 CanvasItemMaterial::CanvasItemMaterial() :
 		element(this) {
+	_set_material(RS::get_singleton()->material_create());
+
 	set_particles_anim_h_frames(1);
 	set_particles_anim_v_frames(1);
 	set_particles_anim_loop(false);
 
 	current_key.invalid_key = 1;
-	is_initialized = true;
-	_queue_shader_change();
+
+	_mark_initialized(callable_mp(this, &CanvasItemMaterial::_queue_shader_change), callable_mp(this, &CanvasItemMaterial::_update_shader));
 }
 
 CanvasItemMaterial::~CanvasItemMaterial() {
 	MutexLock lock(material_mutex);
 
+	ERR_FAIL_NULL(RenderingServer::get_singleton());
+
 	if (shader_map.has(current_key)) {
 		shader_map[current_key].users--;
 		if (shader_map[current_key].users == 0) {
 			//deallocate shader, as it's no longer in use
-			RS::get_singleton()->free(shader_map[current_key].shader);
+			RS::get_singleton()->free_rid(shader_map[current_key].shader);
 			shader_map.erase(current_key);
 		}
 

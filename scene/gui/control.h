@@ -1,54 +1,57 @@
-/*************************************************************************/
-/*  control.h                                                            */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  control.h                                                             */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
-#ifndef CONTROL_H
-#define CONTROL_H
+#pragma once
 
-#include "core/input/shortcut.h"
-#include "core/math/transform_2d.h"
-#include "core/object/gdvirtual.gen.inc"
-#include "core/templates/rid.h"
+#include "core/object/gdvirtual.gen.h"
 #include "scene/main/canvas_item.h"
-#include "scene/main/node.h"
-#include "scene/main/timer.h"
 #include "scene/resources/theme.h"
+#include "servers/display/accessibility_server_enums.h"
 
-class Viewport;
 class Label;
 class Panel;
+class ThemeContext;
+class ThemeOwner;
+class Viewport;
+struct Transform2D;
 
 class Control : public CanvasItem {
 	GDCLASS(Control, CanvasItem);
-	OBJ_CATEGORY("GUI Nodes");
+
+#ifdef TOOLS_ENABLED
+	bool saving = false;
+#endif // TOOLS_ENABLED
 
 public:
+	static constexpr AncestralClass static_ancestral_class = AncestralClass::CONTROL;
+
 	enum Anchor {
 		ANCHOR_BEGIN = 0,
 		ANCHOR_END = 1
@@ -63,16 +66,25 @@ public:
 	enum FocusMode {
 		FOCUS_NONE,
 		FOCUS_CLICK,
-		FOCUS_ALL
+		FOCUS_ALL,
+		FOCUS_ACCESSIBILITY,
+	};
+
+	enum FocusBehaviorRecursive {
+		FOCUS_BEHAVIOR_INHERITED,
+		FOCUS_BEHAVIOR_DISABLED,
+		FOCUS_BEHAVIOR_ENABLED,
 	};
 
 	enum SizeFlags {
+		SIZE_SHRINK_BEGIN = 0,
 		SIZE_FILL = 1,
 		SIZE_EXPAND = 2,
-		SIZE_EXPAND_FILL = SIZE_EXPAND | SIZE_FILL,
-		SIZE_SHRINK_CENTER = 4, //ignored by expand or fill
-		SIZE_SHRINK_END = 8, //ignored by expand or fill
+		SIZE_SHRINK_CENTER = 4,
+		SIZE_SHRINK_END = 8,
+		SIZE_MAXIMIZE = 16,
 
+		SIZE_EXPAND_FILL = SIZE_EXPAND | SIZE_FILL,
 	};
 
 	enum MouseFilter {
@@ -81,6 +93,13 @@ public:
 		MOUSE_FILTER_IGNORE
 	};
 
+	enum MouseBehaviorRecursive {
+		MOUSE_BEHAVIOR_INHERITED,
+		MOUSE_BEHAVIOR_DISABLED,
+		MOUSE_BEHAVIOR_ENABLED,
+	};
+
+	// Keep synced with InputClassEnums and DisplayServerEnums enums.
 	enum CursorShape {
 		CURSOR_ARROW,
 		CURSOR_IBEAM,
@@ -118,7 +137,7 @@ public:
 		PRESET_BOTTOM_WIDE,
 		PRESET_VCENTER_WIDE,
 		PRESET_HCENTER_WIDE,
-		PRESET_WIDE
+		PRESET_FULL_RECT
 	};
 
 	enum LayoutPresetMode {
@@ -128,28 +147,35 @@ public:
 		PRESET_MODE_KEEP_SIZE
 	};
 
+	enum LayoutMode {
+		LAYOUT_MODE_POSITION,
+		LAYOUT_MODE_ANCHORS,
+		LAYOUT_MODE_CONTAINER,
+		LAYOUT_MODE_UNCONTROLLED,
+	};
+
 	enum LayoutDirection {
 		LAYOUT_DIRECTION_INHERITED,
-		LAYOUT_DIRECTION_LOCALE,
+		LAYOUT_DIRECTION_APPLICATION_LOCALE,
 		LAYOUT_DIRECTION_LTR,
-		LAYOUT_DIRECTION_RTL
+		LAYOUT_DIRECTION_RTL,
+		LAYOUT_DIRECTION_SYSTEM_LOCALE,
+		LAYOUT_DIRECTION_MAX,
+#ifndef DISABLE_DEPRECATED
+		LAYOUT_DIRECTION_LOCALE = LAYOUT_DIRECTION_APPLICATION_LOCALE,
+#endif // DISABLE_DEPRECATED
 	};
 
 	enum TextDirection {
 		TEXT_DIRECTION_AUTO = TextServer::DIRECTION_AUTO,
 		TEXT_DIRECTION_LTR = TextServer::DIRECTION_LTR,
 		TEXT_DIRECTION_RTL = TextServer::DIRECTION_RTL,
-		TEXT_DIRECTION_INHERITED,
+		TEXT_DIRECTION_INHERITED = TextServer::DIRECTION_INHERITED,
 	};
 
-	enum StructuredTextParser {
-		STRUCTURED_TEXT_DEFAULT,
-		STRUCTURED_TEXT_URI,
-		STRUCTURED_TEXT_FILE,
-		STRUCTURED_TEXT_EMAIL,
-		STRUCTURED_TEXT_LIST,
-		STRUCTURED_TEXT_NONE,
-		STRUCTURED_TEXT_CUSTOM
+	enum AutoFocusStrategy {
+		STRATEGY_LEGACY,
+		STRATEGY_BALLOON,
 	};
 
 private:
@@ -163,149 +189,319 @@ private:
 		}
 	};
 
+	// This Data struct is to avoid namespace pollution in derived classes.
 	struct Data {
-		Point2 pos_cache;
-		Size2 size_cache;
-		Size2 minimum_size_cache;
-		bool minimum_size_valid = false;
+		struct OffsetTransform {
+			static constexpr Vector2 DEFAULT_TRANSLATION_ABSOLUTE = Vector2();
+			static constexpr Vector2 DEFAULT_TRANSLATION_RELATIVE = Vector2();
+			static constexpr Vector2 DEFAULT_SCALE = Vector2(1, 1);
+			static constexpr real_t DEFAULT_ROTATION = 0.0;
+			static constexpr Vector2 DEFAULT_PIVOT_ABSOLUTE = Vector2();
+			static constexpr Vector2 DEFAULT_PIVOT_RELATIVE = Vector2(0.5, 0.5);
+			static constexpr bool DEFAULT_VISUAL_ONLY = true;
 
-		Size2 last_minimum_size;
-		bool updating_last_minimum_size = false;
+			bool enabled = false;
+			Vector2 translation_absolute = DEFAULT_TRANSLATION_ABSOLUTE;
+			Vector2 translation_relative = DEFAULT_TRANSLATION_RELATIVE;
+			Vector2 scale = DEFAULT_SCALE;
+			real_t rotation = DEFAULT_ROTATION;
+			Vector2 pivot_absolute = DEFAULT_PIVOT_ABSOLUTE;
+			Vector2 pivot_relative = DEFAULT_PIVOT_RELATIVE;
+			bool visual_only = DEFAULT_VISUAL_ONLY;
+		};
+
+		bool initialized = false;
+
+		// Global relations.
+
+		List<Control *>::Element *RI = nullptr;
+
+		Control *parent_control = nullptr;
+		Window *parent_window = nullptr;
+		CanvasItem *parent_canvas_item = nullptr;
+		Callable forward_drag;
+		Callable forward_can_drop;
+		Callable forward_drop;
+
+		// Positioning and sizing.
+
+		LayoutMode stored_layout_mode = LayoutMode::LAYOUT_MODE_POSITION;
+		bool stored_use_custom_anchors = false;
 
 		real_t offset[4] = { 0.0, 0.0, 0.0, 0.0 };
 		real_t anchor[4] = { ANCHOR_BEGIN, ANCHOR_BEGIN, ANCHOR_BEGIN, ANCHOR_BEGIN };
 		FocusMode focus_mode = FOCUS_NONE;
+		FocusBehaviorRecursive focus_behavior_recursive = FOCUS_BEHAVIOR_INHERITED;
+		bool parent_focus_behavior_recursive_enabled = false;
 		GrowDirection h_grow = GROW_DIRECTION_END;
 		GrowDirection v_grow = GROW_DIRECTION_END;
-
-		LayoutDirection layout_dir = LAYOUT_DIRECTION_INHERITED;
-		bool is_rtl_dirty = true;
-		bool is_rtl = false;
-
-		bool auto_translate = true;
 
 		real_t rotation = 0.0;
 		Vector2 scale = Vector2(1, 1);
 		Vector2 pivot_offset;
+		Vector2 pivot_offset_ratio;
+
+		OffsetTransform *offset_transform = nullptr;
+
+		Point2 pos_cache;
+		Size2 size_cache;
+
+		mutable Size2 maximum_size_cache;
+		mutable bool maximum_size_valid = false;
+
+		mutable Size2 parent_maximum_size_cache = Size2(-1, -1);
+
+		Size2 last_maximum_size;
+		bool updating_last_maximum_size = false;
+		bool block_maximum_size_adjust = false;
+
+		mutable Size2 minimum_size_cache;
+		mutable bool minimum_size_valid = false;
+
+		Size2 last_minimum_size;
+		bool updating_last_minimum_size = false;
+		bool block_minimum_size_adjust = false;
+
+		mutable Size2 desired_size_cache;
+		mutable bool desired_size_valid = false;
+
+		Size2 last_desired_size;
+		bool updating_last_desired_size = false;
+
+		bool expanded_by_desired_size = false;
+
+		bool layout_pending = false;
+
 		bool size_warning = true;
 
-		int h_size_flags = SIZE_FILL;
-		int v_size_flags = SIZE_FILL;
+		// Container sizing.
+
+		BitField<SizeFlags> h_size_flags = SIZE_FILL;
+		BitField<SizeFlags> v_size_flags = SIZE_FILL;
 		real_t expand = 1.0;
-		Point2 custom_minimum_size;
+		Size2 custom_maximum_size = Size2(-1, -1);
+		Size2 custom_minimum_size;
+
+		bool propagate_maximum_size = false;
+
+		// Input events and rendering.
 
 		MouseFilter mouse_filter = MOUSE_FILTER_STOP;
+		MouseBehaviorRecursive mouse_behavior_recursive = MOUSE_BEHAVIOR_INHERITED;
+		bool parent_mouse_behavior_recursive_enabled = true;
+		bool force_pass_scroll_events = true;
 
 		bool clip_contents = false;
-
-		bool block_minimum_size_adjust = false;
 		bool disable_visibility_clip = false;
 
-		Control *parent = nullptr;
-		ObjectID drag_owner;
-		Ref<Theme> theme;
-		Control *theme_owner = nullptr;
-		Window *theme_owner_window = nullptr;
-		Window *parent_window = nullptr;
-		StringName theme_type_variation;
-
-		String tooltip;
 		CursorShape default_cursor = CURSOR_ARROW;
 
-		List<Control *>::Element *RI = nullptr;
-
-		CanvasItem *parent_canvas_item = nullptr;
+		// Focus.
 
 		NodePath focus_neighbor[4];
 		NodePath focus_next;
 		NodePath focus_prev;
 
+		ObjectID shortcut_context;
+
+		// Accessibility.
+
+		String accessibility_name;
+		String accessibility_description;
+		AccessibilityServerEnums::AccessibilityLiveMode accessibility_live = AccessibilityServerEnums::AccessibilityLiveMode::LIVE_OFF;
+
+		TypedArray<NodePath> accessibility_controls_nodes;
+		TypedArray<NodePath> accessibility_described_by_nodes;
+		TypedArray<NodePath> accessibility_labeled_by_nodes;
+		TypedArray<NodePath> accessibility_flow_to_nodes;
+
+		// Theming.
+
+		ThemeOwner *theme_owner = nullptr;
+		Ref<Theme> theme;
+		StringName theme_type_variation;
+
 		bool bulk_theme_override = false;
-		HashMap<StringName, Ref<Texture2D>> icon_override;
-		HashMap<StringName, Ref<StyleBox>> style_override;
-		HashMap<StringName, Ref<Font>> font_override;
-		HashMap<StringName, int> font_size_override;
-		HashMap<StringName, Color> color_override;
-		HashMap<StringName, int> constant_override;
+		Theme::ThemeIconMap theme_icon_override;
+		Theme::ThemeStyleMap theme_style_override;
+		Theme::ThemeFontMap theme_font_override;
+		Theme::ThemeFontSizeMap theme_font_size_override;
+		Theme::ThemeColorMap theme_color_override;
+		Theme::ThemeConstantMap theme_constant_override;
+		Theme::ThemeSoundMap theme_sound_override;
+
+		mutable HashMap<StringName, Theme::ThemeIconMap> theme_icon_cache;
+		mutable HashMap<StringName, Theme::ThemeStyleMap> theme_style_cache;
+		mutable HashMap<StringName, Theme::ThemeFontMap> theme_font_cache;
+		mutable HashMap<StringName, Theme::ThemeFontSizeMap> theme_font_size_cache;
+		mutable HashMap<StringName, Theme::ThemeColorMap> theme_color_cache;
+		mutable HashMap<StringName, Theme::ThemeConstantMap> theme_constant_cache;
+		mutable HashMap<StringName, Theme::ThemeSoundMap> theme_audio_cache;
+
+		// Internationalization.
+
+		LayoutDirection layout_dir = LAYOUT_DIRECTION_INHERITED;
+		mutable bool is_rtl_dirty = true;
+		mutable bool is_rtl = false;
+
+		bool localize_numeral_system = true;
+
+		// Extra properties.
+
+		String tooltip;
+		StringName translation_context;
+		AutoTranslateMode tooltip_auto_translate_mode = AUTO_TRANSLATE_MODE_INHERIT;
 
 	} data;
 
-	static constexpr unsigned properties_managed_by_container_count = 11;
+	// Dynamic properties.
+
+	static constexpr unsigned properties_managed_by_container_count = 12;
 	static String properties_managed_by_container[properties_managed_by_container_count];
 
-	void _window_find_focus_neighbor(const Vector2 &p_dir, Node *p_at, const Point2 *p_points, real_t p_min, real_t &r_closest_dist, Control **r_closest);
-	Control *_get_focus_neighbor(Side p_side, int p_count = 0);
+	// Global relations.
+
+	friend class Viewport;
+
+	// Positioning and sizing.
+
+	void _update_canvas_item_transform();
+	Transform2D _get_internal_transform() const;
 
 	void _set_anchor(Side p_side, real_t p_anchor);
 	void _set_position(const Point2 &p_point);
 	void _set_global_position(const Point2 &p_point);
 	void _set_size(const Size2 &p_size);
 
-	void _theme_changed();
-	void _notify_theme_changed();
+	void _compute_layout_rect(Rect2 p_rect, bool p_keep_offsets = false);
 
+	void _set_layout_mode(LayoutMode p_mode);
+	void _update_layout_mode();
+	LayoutMode _get_layout_mode() const;
+	LayoutMode _get_default_layout_mode() const;
+	void _set_anchors_layout_preset(int p_preset);
+	int _get_anchors_layout_preset() const;
+
+	void _update_maximum_size_cache() const;
+	void _update_maximum_size();
+	void _update_minimum_size_cache() const;
 	void _update_minimum_size();
+	void _update_desired_size_cache() const;
+	void _update_desired_size();
+	void _grow_to_desired_size();
+	void _size_changed();
+
+	void _top_level_changed() override {} // Controls don't need to do anything, only other CanvasItems.
+	void _top_level_changed_on_parent() override;
 
 	void _clear_size_warning();
 
-	void _compute_offsets(Rect2 p_rect, const real_t p_anchors[4], real_t (&r_offsets)[4]);
-	void _compute_anchors(Rect2 p_rect, const real_t p_offsets[4], real_t (&r_anchors)[4]);
-
-	void _size_changed();
-	String _get_tooltip() const;
-
-	void _override_changed();
-
-	void _update_canvas_item_transform();
-
-	Transform2D _get_internal_transform() const;
-
-	friend class Viewport;
+	// Input events.
 
 	void _call_gui_input(const Ref<InputEvent> &p_event);
 
-	void _update_minimum_size_cache();
-	friend class Window;
-	static void _propagate_theme_changed(Node *p_at, Control *p_owner, Window *p_owner_window, bool p_assign = true);
+	// Mouse Filter.
 
-	template <class T>
-	static T get_theme_item_in_types(Control *p_theme_owner, Window *p_theme_owner_window, Theme::DataType p_data_type, const StringName &p_name, List<StringName> p_theme_types);
-	static bool has_theme_item_in_types(Control *p_theme_owner, Window *p_theme_owner_window, Theme::DataType p_data_type, const StringName &p_name, List<StringName> p_theme_types);
-	_FORCE_INLINE_ void _get_theme_type_dependencies(const StringName &p_theme_type, List<StringName> *p_list) const;
+	bool _is_mouse_filter_enabled() const;
+	void _update_mouse_behavior_recursive();
+	void _propagate_mouse_behavior_recursive_recursively(bool p_enabled, bool p_skip_non_inherited);
+
+	// Focus.
+
+	void _window_find_focus_neighbor(const Vector2 &p_dir, Node *p_at, const Rect2 &p_rect, const Rect2 &p_clamp, real_t p_min, real_t &r_score, Control **r_closest);
+	Control *_get_focus_neighbor(Side p_side, int p_count = 0);
+	bool _is_focus_mode_enabled() const;
+	void _update_focus_behavior_recursive();
+	void _propagate_focus_behavior_recursive_recursively(bool p_enabled, bool p_skip_non_inherited);
+
+	// Focus Strategies.
+	real_t _focus_strategy_legacy(const Vector2 &p_dir, const Control &p_candidate, const Rect2 &p_rect, const Rect2 &p_clamp, real_t p_min);
+	real_t _focus_strategy_balloon_candidate_score(const Vector2 &p_start, const Vector2 &p_dir, const Pair<Vector2, Vector2> &p_edge);
+	real_t _focus_strategy_balloon(const Vector2 &p_dir, const Control &p_candidate, const Rect2 &p_clamp);
+
+	// Theming.
+
+	void _theme_changed();
+	void _notify_theme_override_changed();
+	void _invalidate_theme_cache();
+
+	void _ensure_allocated_offset_transform();
+
+	// Extra properties.
+
+	static int root_layout_direction;
 
 protected:
-	virtual void add_child_notify(Node *p_child) override;
-	virtual void remove_child_notify(Node *p_child) override;
-
-	//virtual void _window_gui_input(InputEvent p_event);
-
-	virtual Array structured_text_parser(StructuredTextParser p_theme_type, const Array &p_args, const String p_text) const;
+	// Dynamic properties.
 
 	bool _set(const StringName &p_name, const Variant &p_value);
 	bool _get(const StringName &p_name, Variant &r_ret) const;
 	void _get_property_list(List<PropertyInfo> *p_list) const;
+	void _validate_property(PropertyInfo &p_property) const;
+
+	bool _property_can_revert(const StringName &p_name) const;
+	bool _property_get_revert(const StringName &p_name, Variant &r_property) const;
+
+	// Localization
+
+	virtual StringName _get_translation_context_with_override(const StringName &p_context) const override;
+
+	// Theming.
+
+	virtual void _update_theme_item_cache();
+
+	// Internationalization.
+
+	virtual TypedArray<Vector3i> structured_text_parser(TextServer::StructuredTextParser p_parser_type, const Array &p_args, const String &p_text) const;
+
+	// Base object overrides.
 
 	void _notification(int p_notification);
 	static void _bind_methods();
-	virtual void _validate_property(PropertyInfo &property) const override;
 
-	//bind helpers
+	void _accessibility_action_foucs(const Variant &p_data);
+	void _accessibility_action_blur(const Variant &p_data);
+	void _accessibility_action_show_tooltip(const Variant &p_data);
+	void _accessibility_action_hide_tooltip(const Variant &p_data);
+	void _accessibility_action_scroll_into_view(const Variant &p_data);
+
+#ifndef DISABLE_DEPRECATED
+	bool _has_focus_bind_compat_110250() const;
+	void _grab_focus_bind_compat_110250();
+	static void _bind_compatibility_methods();
+#endif //DISABLE_DEPRECATED
+
+	// Focus.
+	bool _is_focusable() const;
+
+	// Node overrides.
+
+	virtual void add_child_notify(Node *p_child) override;
+	virtual void remove_child_notify(Node *p_child) override;
+
+	// Exposed virtual methods.
 
 	GDVIRTUAL1RC(bool, _has_point, Vector2)
-	GDVIRTUAL2RC(Array, _structured_text_parser, Array, String)
+	GDVIRTUAL2RC(TypedArray<Vector3i>, _structured_text_parser, Array, String)
+	GDVIRTUAL0RC(Vector2, _get_maximum_size)
 	GDVIRTUAL0RC(Vector2, _get_minimum_size)
+	GDVIRTUAL1RC(String, _get_tooltip, Vector2)
+	GDVIRTUAL1RC(AutoTranslateMode, _get_tooltip_auto_translate_mode_at, Vector2)
 
-	GDVIRTUAL1RC(Variant, _get_drag_data, Vector2)
+	GDVIRTUAL1R(Variant, _get_drag_data, Vector2)
 	GDVIRTUAL2RC(bool, _can_drop_data, Vector2, Variant)
 	GDVIRTUAL2(_drop_data, Vector2, Variant)
 	GDVIRTUAL1RC(Object *, _make_custom_tooltip, String)
 
-	GDVIRTUAL1(_gui_input, Ref<InputEvent>)
+	GDVIRTUAL1RC(int, _get_cursor_shape, Vector2)
+
+	GDVIRTUAL0RC(String, _accessibility_get_contextual_info);
+	GDVIRTUAL1RC(String, _get_accessibility_container_name, RequiredParam<const Node>)
+
+	GDVIRTUAL1(_gui_input, RequiredParam<InputEvent>)
 
 public:
 	enum {
-		/*		NOTIFICATION_DRAW=30,
-		NOTIFICATION_VISIBILITY_CHANGED=38*/
 		NOTIFICATION_RESIZED = 40,
 		NOTIFICATION_MOUSE_ENTER = 41,
 		NOTIFICATION_MOUSE_EXIT = 42,
@@ -315,11 +511,13 @@ public:
 		NOTIFICATION_SCROLL_BEGIN = 47,
 		NOTIFICATION_SCROLL_END = 48,
 		NOTIFICATION_LAYOUT_DIRECTION_CHANGED = 49,
-
+		NOTIFICATION_MOUSE_ENTER_SELF = 60,
+		NOTIFICATION_MOUSE_EXIT_SELF = 61,
 	};
 
-	/* EDITOR */
-#ifdef TOOLS_ENABLED
+	// Editor plugin interoperability.
+
+#ifdef DEBUG_ENABLED
 	virtual Dictionary _edit_get_state() const override;
 	virtual void _edit_set_state(const Dictionary &p_state) override;
 
@@ -330,8 +528,6 @@ public:
 	virtual Size2 _edit_get_scale() const override;
 
 	virtual void _edit_set_rect(const Rect2 &p_edit_rect) override;
-	virtual Rect2 _edit_get_rect() const override;
-	virtual bool _edit_use_rect() const override;
 
 	virtual void _edit_set_rotation(real_t p_rotation) override;
 	virtual real_t _edit_get_rotation() const override;
@@ -342,56 +538,59 @@ public:
 	virtual bool _edit_use_pivot() const override;
 
 	virtual Size2 _edit_get_minimum_size() const override;
-#endif
 
-	virtual void gui_input(const Ref<InputEvent> &p_event);
+	virtual Rect2 _edit_get_rect() const override;
+	virtual bool _edit_use_rect() const override;
+#endif // DEBUG_ENABLED
 
-	void accept_event();
+	virtual void reparent(RequiredParam<Node> p_parent, bool p_keep_global_transform = true) override;
 
-	virtual Size2 get_minimum_size() const;
-	virtual Size2 get_combined_minimum_size() const;
-	virtual bool has_point(const Point2 &p_point) const;
-	virtual void set_drag_forwarding(Object *p_target);
-	virtual Variant get_drag_data(const Point2 &p_point);
-	virtual bool can_drop_data(const Point2 &p_point, const Variant &p_data) const;
-	virtual void drop_data(const Point2 &p_point, const Variant &p_data);
-	void set_drag_preview(Control *p_control);
-	void force_drag(const Variant &p_data, Control *p_control);
-	bool is_drag_successful() const;
+	// Editor integration.
 
-	void set_custom_minimum_size(const Size2 &p_custom);
-	Size2 get_custom_minimum_size() const;
+	static void set_root_layout_direction(int p_root_dir);
+
+	PackedStringArray get_configuration_warnings() const override;
+	PackedStringArray get_accessibility_configuration_warnings() const override;
+#ifdef TOOLS_ENABLED
+	virtual void get_argument_options(const StringName &p_function, int p_idx, List<String> *r_options) const override;
+#endif //TOOLS_ENABLED
+
+	virtual bool is_text_field() const;
+
+	// Global relations.
 
 	Control *get_parent_control() const;
 	Window *get_parent_window() const;
+	Control *get_root_parent_control() const;
 
-	void set_layout_direction(LayoutDirection p_direction);
-	LayoutDirection get_layout_direction() const;
-	virtual bool is_layout_rtl() const;
+	Size2 get_parent_area_size() const;
+	Rect2 get_parent_anchorable_rect() const;
 
-	void set_auto_translate(bool p_enable);
-	bool is_auto_translating() const;
-	_FORCE_INLINE_ String atr(const String p_string) const { return is_auto_translating() ? tr(p_string) : p_string; };
+	// Positioning and sizing.
 
-	/* POSITIONING */
+	virtual Transform2D get_transform() const override;
+
+	void set_anchor(Side p_side, real_t p_anchor, bool p_keep_offset = true, bool p_push_opposite_anchor = true);
+	real_t get_anchor(Side p_side) const;
+	void set_offset(Side p_side, real_t p_value);
+	real_t get_offset(Side p_side) const;
+	void set_anchor_and_offset(Side p_side, real_t p_anchor, real_t p_pos, bool p_push_opposite_anchor = true);
+
+	// TODO: Rename to set_begin/end_offsets ?
+	void set_begin(const Point2 &p_point);
+	Point2 get_begin() const;
+	void set_end(const Point2 &p_point);
+	Point2 get_end() const;
+
+	void set_h_grow_direction(GrowDirection p_direction);
+	GrowDirection get_h_grow_direction() const;
+	void set_v_grow_direction(GrowDirection p_direction);
+	GrowDirection get_v_grow_direction() const;
 
 	void set_anchors_preset(LayoutPreset p_preset, bool p_keep_offsets = true);
 	void set_offsets_preset(LayoutPreset p_preset, LayoutPresetMode p_resize_mode = PRESET_MODE_MINSIZE, int p_margin = 0);
 	void set_anchors_and_offsets_preset(LayoutPreset p_preset, LayoutPresetMode p_resize_mode = PRESET_MODE_MINSIZE, int p_margin = 0);
-
-	void set_anchor(Side p_side, real_t p_anchor, bool p_keep_offset = true, bool p_push_opposite_anchor = true);
-	real_t get_anchor(Side p_side) const;
-
-	void set_offset(Side p_side, real_t p_value);
-	real_t get_offset(Side p_side) const;
-
-	void set_anchor_and_offset(Side p_side, real_t p_anchor, real_t p_pos, bool p_push_opposite_anchor = true);
-
-	void set_begin(const Point2 &p_point); // helper
-	void set_end(const Point2 &p_point); // helper
-
-	Point2 get_begin() const;
-	Point2 get_end() const;
+	void set_grow_direction_preset(LayoutPreset p_preset);
 
 	void set_position(const Point2 &p_point, bool p_keep_offsets = false);
 	void set_global_position(const Point2 &p_point, bool p_keep_offsets = false);
@@ -403,56 +602,143 @@ public:
 	Size2 get_size() const;
 	void reset_size();
 
+	void set_rect(const Rect2 &p_rect); // Reset anchors to begin and set rect, for faster container children sorting.
 	Rect2 get_rect() const;
 	Rect2 get_global_rect() const;
 	Rect2 get_screen_rect() const;
-	Rect2 get_window_rect() const; ///< use with care, as it blocks waiting for the rendering server
 	Rect2 get_anchorable_rect() const override;
-
-	void set_rect(const Rect2 &p_rect); // Reset anchors to begin and set rect, for faster container children sorting.
-
-	void set_rotation(real_t p_radians);
-	real_t get_rotation() const;
-
-	void set_h_grow_direction(GrowDirection p_direction);
-	GrowDirection get_h_grow_direction() const;
-
-	void set_v_grow_direction(GrowDirection p_direction);
-	GrowDirection get_v_grow_direction() const;
-
-	void set_pivot_offset(const Vector2 &p_pivot);
-	Vector2 get_pivot_offset() const;
 
 	void set_scale(const Vector2 &p_scale);
 	Vector2 get_scale() const;
+	void set_rotation(real_t p_radians);
+	void set_rotation_degrees(real_t p_degrees);
+	real_t get_rotation() const;
+	real_t get_rotation_degrees() const;
+	void set_pivot_offset_ratio(const Vector2 &p_ratio);
+	Vector2 get_pivot_offset_ratio() const;
+	void set_pivot_offset(const Vector2 &p_pivot);
+	Vector2 get_pivot_offset() const;
+	Vector2 get_combined_pivot_offset() const;
 
-	void set_theme(const Ref<Theme> &p_theme);
-	Ref<Theme> get_theme() const;
+	void set_propagate_maximum_size(bool p_propagate);
+	bool is_propagating_maximum_size();
 
-	void set_theme_type_variation(const StringName &p_theme_type);
-	StringName get_theme_type_variation() const;
+	void update_maximum_size();
+	void update_minimum_size();
+	void update_desired_size();
 
-	void set_h_size_flags(int p_flags);
-	int get_h_size_flags() const;
+	void grow_to_desired_size();
+	bool is_expanded_by_desired_size() const;
 
-	void set_v_size_flags(int p_flags);
-	int get_v_size_flags() const;
+	void set_block_maximum_size_adjust(bool p_block);
+	void set_block_minimum_size_adjust(bool p_block);
 
+	virtual Size2 get_maximum_size() const;
+	virtual Size2 get_combined_maximum_size() const;
+	virtual Size2 get_inner_combined_maximum_size() const;
+
+	void set_custom_maximum_size(const Size2 &p_custom);
+	Size2 get_custom_maximum_size() const;
+
+	void set_parent_maximum_size_cache(const Size2 &p_size);
+
+	virtual Size2 get_minimum_size() const;
+	virtual Size2 get_combined_minimum_size() const;
+
+	void set_custom_minimum_size(const Size2 &p_custom);
+	Size2 get_custom_minimum_size() const;
+
+	virtual Size2 get_bound_minimum_size() const;
+
+	Size2 get_bound_desired_size() const;
+	virtual Size2 get_desired_size() const;
+
+	bool is_layout_pending() const;
+	bool is_layout_pending_in_tree() const;
+	void layout_pending_start();
+	void layout_pending_finish();
+	Control *get_layout_pending_control_in_tree() const;
+	void call_on_all_layout_pending_finished(const Callable &p_callable);
+
+	// Container sizing.
+
+	void set_h_size_flags(BitField<SizeFlags> p_flags);
+	BitField<SizeFlags> get_h_size_flags() const;
+	void set_v_size_flags(BitField<SizeFlags> p_flags);
+	BitField<SizeFlags> get_v_size_flags() const;
 	void set_stretch_ratio(real_t p_ratio);
 	real_t get_stretch_ratio() const;
 
-	void minimum_size_changed();
+	// Offset transform.
 
-	/* FOCUS */
+	void set_offset_transform_enabled(bool p_enabled);
+	bool is_offset_transform_enabled() const;
+	void set_offset_transform_position(const Vector2 &p_offset);
+	Vector2 get_offset_transform_position() const;
+	void set_offset_transform_position_ratio(const Vector2 &p_offset);
+	Vector2 get_offset_transform_position_ratio() const;
+	void set_offset_transform_scale(const Vector2 &p_scale);
+	Vector2 get_offset_transform_scale() const;
+	void set_offset_transform_rotation(real_t p_rotation);
+	real_t get_offset_transform_rotation() const;
+	void set_offset_transform_pivot(const Vector2 &p_pivot);
+	Vector2 get_offset_transform_pivot() const;
+	void set_offset_transform_pivot_ratio(const Vector2 &p_pivot);
+	Vector2 get_offset_transform_pivot_ratio() const;
+	void set_offset_transform_visual_only(bool p_enabled);
+	bool is_offset_transform_visual_only() const;
+	Transform2D get_offset_transform() const;
+
+	// Input events.
+
+	virtual void gui_input(const Ref<InputEvent> &p_event);
+	void accept_event();
+
+	virtual bool has_point(const Point2 &p_point) const;
+
+	void set_mouse_filter(MouseFilter p_filter);
+	MouseFilter get_mouse_filter() const;
+	MouseFilter get_mouse_filter_with_override() const;
+
+	void set_mouse_behavior_recursive(MouseBehaviorRecursive p_mouse_behavior_recursive);
+	MouseBehaviorRecursive get_mouse_behavior_recursive() const;
+
+	void set_force_pass_scroll_events(bool p_force_pass_scroll_events);
+	bool is_force_pass_scroll_events() const;
+
+	void warp_mouse(const Point2 &p_position);
+
+	bool is_focus_owner_in_shortcut_context() const;
+	void set_shortcut_context(const Node *p_node);
+	Node *get_shortcut_context() const;
+
+	// Drag and drop handling.
+
+	virtual void set_drag_forwarding(const Callable &p_drag, const Callable &p_can_drop, const Callable &p_drop);
+	virtual Variant get_drag_data(const Point2 &p_point);
+	virtual bool can_drop_data(const Point2 &p_point, const Variant &p_data) const;
+	virtual void drop_data(const Point2 &p_point, const Variant &p_data);
+	void set_drag_preview(Control *p_control);
+	void force_drag(const Variant &p_data, Control *p_control);
+	void accessibility_drag();
+	void accessibility_drop();
+	bool is_drag_successful() const;
+
+	// Focus.
 
 	void set_focus_mode(FocusMode p_focus_mode);
 	FocusMode get_focus_mode() const;
-	bool has_focus() const;
-	void grab_focus();
+	FocusMode get_focus_mode_with_override() const;
+	void set_focus_behavior_recursive(FocusBehaviorRecursive p_focus_behavior_recursive);
+	FocusBehaviorRecursive get_focus_behavior_recursive() const;
+	bool has_focus(bool p_ignore_hidden_focus = false) const;
+	void grab_focus(bool p_hide_focus = false);
+	void grab_click_focus();
 	void release_focus();
 
 	Control *find_next_valid_focus() const;
 	Control *find_prev_valid_focus() const;
+	Control *find_valid_focus_neighbor(Side p_size) const;
 
 	void set_focus_neighbor(Side p_side, const NodePath &p_neighbor);
 	NodePath get_focus_neighbor(Side p_side) const;
@@ -462,22 +748,75 @@ public:
 	void set_focus_previous(const NodePath &p_prev);
 	NodePath get_focus_previous() const;
 
-	Control *get_focus_owner() const;
+	// Theme sound playback.
 
-	void set_mouse_filter(MouseFilter p_filter);
-	MouseFilter get_mouse_filter() const;
+	void play_theme_sound(const Ref<AudioStream> &p_stream);
 
-	/* SKINNING */
+	// Accessibility.
+
+	virtual String get_accessibility_container_name(const Node *p_node) const;
+
+	void set_accessibility_name(const String &p_name);
+	String get_accessibility_name() const;
+
+	virtual String _get_accessibility_name() const;
+
+	void set_accessibility_description(const String &p_description);
+	String get_accessibility_description() const;
+
+	void set_accessibility_live(AccessibilityServerEnums::AccessibilityLiveMode p_mode);
+	AccessibilityServerEnums::AccessibilityLiveMode get_accessibility_live() const;
+
+	void set_accessibility_controls_nodes(const TypedArray<NodePath> &p_node_path);
+	TypedArray<NodePath> get_accessibility_controls_nodes() const;
+
+	void set_accessibility_described_by_nodes(const TypedArray<NodePath> &p_node_path);
+	TypedArray<NodePath> get_accessibility_described_by_nodes() const;
+
+	void set_accessibility_labeled_by_nodes(const TypedArray<NodePath> &p_node_path);
+	TypedArray<NodePath> get_accessibility_labeled_by_nodes() const;
+
+	void set_accessibility_flow_to_nodes(const TypedArray<NodePath> &p_node_path);
+	TypedArray<NodePath> get_accessibility_flow_to_nodes() const;
+
+	virtual Transform2D get_accessibility_transform() const override { return get_global_transform(); }
+
+	// Rendering.
+
+	void set_default_cursor_shape(CursorShape p_shape);
+	CursorShape get_default_cursor_shape() const;
+	virtual CursorShape get_cursor_shape(const Point2 &p_pos = Point2()) const;
+
+	void set_clip_contents(bool p_clip);
+	bool is_clipping_contents();
+
+	void set_disable_visibility_clip(bool p_ignore);
+	bool is_visibility_clip_disabled() const;
+
+	// Theming.
+
+	void set_theme_owner_node(Node *p_node);
+	Node *get_theme_owner_node() const;
+	bool has_theme_owner_node() const;
+
+	void set_theme_context(ThemeContext *p_context, bool p_propagate = true);
+
+	void set_theme(const Ref<Theme> &p_theme);
+	Ref<Theme> get_theme() const;
+
+	void set_theme_type_variation(const StringName &p_theme_type);
+	StringName get_theme_type_variation() const;
 
 	void begin_bulk_theme_override();
 	void end_bulk_theme_override();
 
-	void add_theme_icon_override(const StringName &p_name, const Ref<Texture2D> &p_icon);
-	void add_theme_style_override(const StringName &p_name, const Ref<StyleBox> &p_style);
-	void add_theme_font_override(const StringName &p_name, const Ref<Font> &p_font);
+	void add_theme_icon_override(const StringName &p_name, RequiredParam<Texture2D> p_icon);
+	void add_theme_style_override(const StringName &p_name, RequiredParam<StyleBox> p_style);
+	void add_theme_font_override(const StringName &p_name, RequiredParam<Font> p_font);
 	void add_theme_font_size_override(const StringName &p_name, int p_font_size);
 	void add_theme_color_override(const StringName &p_name, const Color &p_color);
 	void add_theme_constant_override(const StringName &p_name, int p_constant);
+	void add_theme_sound_override(const StringName &p_name, const Ref<AudioStream> &p_sound);
 
 	void remove_theme_icon_override(const StringName &p_name);
 	void remove_theme_style_override(const StringName &p_name);
@@ -485,6 +824,7 @@ public:
 	void remove_theme_font_size_override(const StringName &p_name);
 	void remove_theme_color_override(const StringName &p_name);
 	void remove_theme_constant_override(const StringName &p_name);
+	void remove_theme_sound_override(const StringName &p_name);
 
 	Ref<Texture2D> get_theme_icon(const StringName &p_name, const StringName &p_theme_type = StringName()) const;
 	Ref<StyleBox> get_theme_stylebox(const StringName &p_name, const StringName &p_theme_type = StringName()) const;
@@ -492,6 +832,12 @@ public:
 	int get_theme_font_size(const StringName &p_name, const StringName &p_theme_type = StringName()) const;
 	Color get_theme_color(const StringName &p_name, const StringName &p_theme_type = StringName()) const;
 	int get_theme_constant(const StringName &p_name, const StringName &p_theme_type = StringName()) const;
+	Ref<AudioStream> get_theme_sound(const StringName &p_name, const StringName &p_theme_type = StringName()) const;
+	Variant get_theme_item(Theme::DataType p_data_type, const StringName &p_name, const StringName &p_theme_type = StringName()) const;
+	Variant get_used_theme_item(const String &p_full_name, const StringName &p_theme_type = StringName()) const;
+#ifdef TOOLS_ENABLED
+	Ref<Texture2D> get_editor_theme_icon(const StringName &p_name) const;
+#endif //TOOLS_ENABLED
 
 	bool has_theme_icon_override(const StringName &p_name) const;
 	bool has_theme_stylebox_override(const StringName &p_name) const;
@@ -499,6 +845,7 @@ public:
 	bool has_theme_font_size_override(const StringName &p_name) const;
 	bool has_theme_color_override(const StringName &p_name) const;
 	bool has_theme_constant_override(const StringName &p_name) const;
+	bool has_theme_sound_override(const StringName &p_name) const;
 
 	bool has_theme_icon(const StringName &p_name, const StringName &p_theme_type = StringName()) const;
 	bool has_theme_stylebox(const StringName &p_name, const StringName &p_theme_type = StringName()) const;
@@ -506,67 +853,61 @@ public:
 	bool has_theme_font_size(const StringName &p_name, const StringName &p_theme_type = StringName()) const;
 	bool has_theme_color(const StringName &p_name, const StringName &p_theme_type = StringName()) const;
 	bool has_theme_constant(const StringName &p_name, const StringName &p_theme_type = StringName()) const;
-
-	static float fetch_theme_default_base_scale(Control *p_theme_owner, Window *p_theme_owner_window);
-	static Ref<Font> fetch_theme_default_font(Control *p_theme_owner, Window *p_theme_owner_window);
-	static int fetch_theme_default_font_size(Control *p_theme_owner, Window *p_theme_owner_window);
+	bool has_theme_sound(const StringName &p_name, const StringName &p_theme_type = StringName()) const;
 
 	float get_theme_default_base_scale() const;
 	Ref<Font> get_theme_default_font() const;
 	int get_theme_default_font_size() const;
 
-	/* TOOLTIP */
+	// Internationalization.
 
-	void set_tooltip(const String &p_tooltip);
+	void set_layout_direction(LayoutDirection p_direction);
+	LayoutDirection get_layout_direction() const;
+	virtual bool is_layout_rtl() const;
+
+	void set_localize_numeral_system(bool p_enable);
+	bool is_localizing_numeral_system() const;
+
+#ifndef DISABLE_DEPRECATED
+	void set_auto_translate(bool p_enable);
+	bool is_auto_translating() const;
+#endif //DISABLE_DEPRECATED
+
+	void set_tooltip_auto_translate_mode(AutoTranslateMode p_mode);
+	AutoTranslateMode get_tooltip_auto_translate_mode() const;
+	virtual AutoTranslateMode get_tooltip_auto_translate_mode_at(const Vector2 &p_at) const;
+
+	// Extra properties.
+
+	String get_tooltip_text() const;
+	void set_tooltip_text(const String &text);
+	StringName get_translation_context() const;
+	void set_translation_context(const StringName &p_context);
 	virtual String get_tooltip(const Point2 &p_pos) const;
 	virtual Control *make_custom_tooltip(const String &p_text) const;
 
-	/* CURSOR */
+	virtual String accessibility_get_contextual_info() const;
 
-	void set_default_cursor_shape(CursorShape p_shape);
-	CursorShape get_default_cursor_shape() const;
-	virtual CursorShape get_cursor_shape(const Point2 &p_pos = Point2i()) const;
-
-	virtual Transform2D get_transform() const override;
-
-	bool is_top_level_control() const;
-
-	Size2 get_parent_area_size() const;
-	Rect2 get_parent_anchorable_rect() const;
-
-	void grab_click_focus();
-
-	void warp_mouse(const Point2 &p_to_pos);
-
-	virtual bool is_text_field() const;
-
-	Control *get_root_parent_control() const;
-
-	void set_clip_contents(bool p_clip);
-	bool is_clipping_contents();
-
-	void set_block_minimum_size_adjust(bool p_block);
-	bool is_minimum_size_adjust_blocked() const;
-
-	void set_disable_visibility_clip(bool p_ignore);
-	bool is_visibility_clip_disabled() const;
-
-	virtual void get_argument_options(const StringName &p_function, int p_idx, List<String> *r_options) const override;
-	TypedArray<String> get_configuration_warnings() const override;
-
-	Control() {}
+	Control();
+	~Control();
 };
 
 VARIANT_ENUM_CAST(Control::FocusMode);
-VARIANT_ENUM_CAST(Control::SizeFlags);
+VARIANT_ENUM_CAST(Control::FocusBehaviorRecursive);
+VARIANT_ENUM_CAST(Control::MouseBehaviorRecursive);
+VARIANT_BITFIELD_CAST(Control::SizeFlags);
 VARIANT_ENUM_CAST(Control::CursorShape);
 VARIANT_ENUM_CAST(Control::LayoutPreset);
 VARIANT_ENUM_CAST(Control::LayoutPresetMode);
 VARIANT_ENUM_CAST(Control::MouseFilter);
 VARIANT_ENUM_CAST(Control::GrowDirection);
 VARIANT_ENUM_CAST(Control::Anchor);
+VARIANT_ENUM_CAST(Control::LayoutMode);
 VARIANT_ENUM_CAST(Control::LayoutDirection);
 VARIANT_ENUM_CAST(Control::TextDirection);
-VARIANT_ENUM_CAST(Control::StructuredTextParser);
 
-#endif
+// G = get_drag_data_fw, C = can_drop_data_fw, D = drop_data_fw, U = underscore
+#define SET_DRAG_FORWARDING_CD(from, to) from->set_drag_forwarding(Callable(), callable_mp(this, &to::can_drop_data_fw).bind(from), callable_mp(this, &to::drop_data_fw).bind(from));
+#define SET_DRAG_FORWARDING_CDU(from, to) from->set_drag_forwarding(Callable(), callable_mp(this, &to::_can_drop_data_fw).bind(from), callable_mp(this, &to::_drop_data_fw).bind(from));
+#define SET_DRAG_FORWARDING_GCD(from, to) from->set_drag_forwarding(callable_mp(this, &to::get_drag_data_fw).bind(from), callable_mp(this, &to::can_drop_data_fw).bind(from), callable_mp(this, &to::drop_data_fw).bind(from));
+#define SET_DRAG_FORWARDING_GCDU(from, to) from->set_drag_forwarding(callable_mp(this, &to::_get_drag_data_fw).bind(from), callable_mp(this, &to::_can_drop_data_fw).bind(from), callable_mp(this, &to::_drop_data_fw).bind(from));

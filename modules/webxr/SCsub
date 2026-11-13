@@ -1,9 +1,10 @@
 #!/usr/bin/env python
+from misc.utility.scons_hints import *
 
 Import("env")
 Import("env_modules")
 
-if env["platform"] == "javascript":
+if env["platform"] == "web":
     env.AddJSLibraries(["native/library_godot_webxr.js"])
     env.AddJSExterns(["native/webxr.externs.js"])
 

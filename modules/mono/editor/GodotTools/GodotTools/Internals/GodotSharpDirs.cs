@@ -1,103 +1,195 @@
-using System.Runtime.CompilerServices;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.IO;
+using System.Threading;
+using Godot;
+using Godot.NativeInterop;
+using Microsoft.VisualStudio.SolutionPersistence;
+using Microsoft.VisualStudio.SolutionPersistence.Serializer;
 
 namespace GodotTools.Internals
 {
     public static class GodotSharpDirs
     {
-        public static string ResDataDir => internal_ResDataDir();
-        public static string ResMetadataDir => internal_ResMetadataDir();
-        public static string ResAssembliesBaseDir => internal_ResAssembliesBaseDir();
-        public static string ResAssembliesDir => internal_ResAssembliesDir();
-        public static string ResConfigDir => internal_ResConfigDir();
-        public static string ResTempDir => internal_ResTempDir();
-        public static string ResTempAssembliesBaseDir => internal_ResTempAssembliesBaseDir();
-        public static string ResTempAssembliesDir => internal_ResTempAssembliesDir();
+        public static string ResMetadataDir
+        {
+            get
+            {
+                Internal.godot_icall_GodotSharpDirs_ResMetadataDir(out godot_string dest);
+                using (dest)
+                    return Marshaling.ConvertStringToManaged(dest);
+            }
+        }
 
-        public static string MonoUserDir => internal_MonoUserDir();
-        public static string MonoLogsDir => internal_MonoLogsDir();
+        public static string MonoUserDir
+        {
+            get
+            {
+                Internal.godot_icall_GodotSharpDirs_MonoUserDir(out godot_string dest);
+                using (dest)
+                    return Marshaling.ConvertStringToManaged(dest);
+            }
+        }
 
-        #region Tools-only
-        public static string MonoSolutionsDir => internal_MonoSolutionsDir();
-        public static string BuildLogsDirs => internal_BuildLogsDirs();
+        public static string BuildLogsDirs
+        {
+            get
+            {
+                Internal.godot_icall_GodotSharpDirs_BuildLogsDirs(out godot_string dest);
+                using (dest)
+                    return Marshaling.ConvertStringToManaged(dest);
+            }
+        }
 
-        public static string ProjectSlnPath => internal_ProjectSlnPath();
-        public static string ProjectCsProjPath => internal_ProjectCsProjPath();
-
-        public static string DataEditorToolsDir => internal_DataEditorToolsDir();
-        public static string DataEditorPrebuiltApiDir => internal_DataEditorPrebuiltApiDir();
-        #endregion
-
-        public static string DataMonoEtcDir => internal_DataMonoEtcDir();
-        public static string DataMonoLibDir => internal_DataMonoLibDir();
-
-        #region Windows-only
-        public static string DataMonoBinDir => internal_DataMonoBinDir();
-        #endregion
+        public static string DataEditorToolsDir
+        {
+            get
+            {
+                Internal.godot_icall_GodotSharpDirs_DataEditorToolsDir(out godot_string dest);
+                using (dest)
+                    return Marshaling.ConvertStringToManaged(dest);
+            }
+        }
 
 
-        #region Internal
+        public static string CSharpProjectName
+        {
+            get
+            {
+                Internal.godot_icall_GodotSharpDirs_CSharpProjectName(out godot_string dest);
+                using (dest)
+                    return Marshaling.ConvertStringToManaged(dest);
+            }
+        }
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_ResDataDir();
+        [MemberNotNull("_projectAssemblyName", "_projectSlnPath", "_projectCsProjPath")]
+        public static void DetermineProjectLocation()
+        {
+            _projectAssemblyName = (string?)ProjectSettings.GetSetting("dotnet/project/assembly_name");
+            if (string.IsNullOrEmpty(_projectAssemblyName))
+            {
+                _projectAssemblyName = CSharpProjectName;
+                ProjectSettings.SetSetting("dotnet/project/assembly_name", _projectAssemblyName);
+            }
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_ResMetadataDir();
+            string? slnParentDir = (string?)ProjectSettings.GetSetting("dotnet/project/solution_directory");
+            if (string.IsNullOrEmpty(slnParentDir))
+                slnParentDir = "res://";
+            else if (!slnParentDir.StartsWith("res://", StringComparison.Ordinal))
+                slnParentDir = "res://" + slnParentDir;
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_ResAssembliesBaseDir();
+            // The csproj should be in the same folder as project.godot.
+            string csprojParentDir = "res://";
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_ResAssembliesDir();
+            // Set csproj path first and use it to find the sln/slnx file with the assembly
+            _projectCsProjPath = Path.Combine(ProjectSettings.GlobalizePath(csprojParentDir),
+                string.Concat(_projectAssemblyName, ".csproj"));
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_ResConfigDir();
+            _projectSlnPath = FindSolutionFileWithAssemblyName(slnParentDir, _projectAssemblyName);
+        }
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_ResTempDir();
+        private static string FindSolutionFileWithAssemblyName(string directory, string assemblyName)
+        {
+            // Will convert ".." to load solutions from parent directory when appropriate
+            string slnAbsolutePath = Path.GetFullPath(ProjectSettings.GlobalizePath(directory));
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_ResTempAssembliesBaseDir();
+            List<string> solutionFilePaths = new();
+            solutionFilePaths.AddRange(Directory.GetFiles(slnAbsolutePath, "*.sln"));
+            solutionFilePaths.AddRange(Directory.GetFiles(slnAbsolutePath, "*.slnx"));
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_ResTempAssembliesDir();
+            if (solutionFilePaths.Count == 0)
+                return Path.Combine(slnAbsolutePath, $"{assemblyName}.sln");
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_MonoUserDir();
+            List<string> matchingSolutions = new();
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_MonoLogsDir();
+            foreach (string solutionFilePath in solutionFilePaths)
+            {
+                ISolutionSerializer? serializer = SolutionSerializers.GetSerializerByMoniker(solutionFilePath);
+                if (serializer is null)
+                    continue;
 
-        #region Tools-only
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_MonoSolutionsDir();
+                string? solutionDirectory = Path.GetDirectoryName(solutionFilePath);
+                if (solutionDirectory is null)
+                    continue;
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_BuildLogsDirs();
+                var solution = serializer.OpenAsync(solutionFilePath, CancellationToken.None).Result;
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_ProjectSlnPath();
+                foreach (var project in solution.SolutionProjects)
+                {
+                    // Convert '\' path separators on Windows to '/' to match Godot's Unix style separators
+                    var absoluteProjectFilePath = Path.GetFullPath(project.FilePath, solutionDirectory).Replace('\\', '/');
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_ProjectCsProjPath();
+                    if (string.Equals(absoluteProjectFilePath, _projectCsProjPath, StringComparison.Ordinal))
+                        matchingSolutions.Add(solutionFilePath);
+                }
+            }
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_DataEditorToolsDir();
+            switch (matchingSolutions.Count)
+            {
+                case 1:
+                    return matchingSolutions[0];
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_DataEditorPrebuiltApiDir();
-        #endregion
+                case > 1:
+                    GD.PushError(
+                        $"Multiple solutions containing a project with assembly name '{assemblyName}' were found:\n"
+                        + $"{string.Join('\n', matchingSolutions).Replace('\\', '/')}\n"
+                        + "Please ensure only one solution contains the project assembly.\n"
+                        + "If you have recently migrated to .slnx please ensure that you have removed the unused .sln.");
+                    break;
+            }
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_DataMonoEtcDir();
+            return Path.Combine(slnAbsolutePath, $"{assemblyName}.sln");
+        }
 
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_DataMonoLibDir();
+        private static string? _projectAssemblyName;
+        private static string? _projectSlnPath;
+        private static string? _projectCsProjPath;
 
-        #region Windows-only
-        [MethodImpl(MethodImplOptions.InternalCall)]
-        private static extern string internal_DataMonoBinDir();
-        #endregion
+        public static string ProjectAssemblyName
+        {
+            get
+            {
+                if (_projectAssemblyName == null)
+                    DetermineProjectLocation();
+                return _projectAssemblyName;
+            }
+        }
 
-        #endregion
+        public static string ProjectSlnPath
+        {
+            get
+            {
+                if (_projectSlnPath == null)
+                    DetermineProjectLocation();
+                return _projectSlnPath;
+            }
+        }
+
+        public static string ProjectCsProjPath
+        {
+            get
+            {
+                if (_projectCsProjPath == null)
+                    DetermineProjectLocation();
+                return _projectCsProjPath;
+            }
+        }
+
+        public static string ProjectBaseOutputPath
+        {
+            get
+            {
+                if (_projectCsProjPath == null)
+                    DetermineProjectLocation();
+                return Path.Combine(Path.GetDirectoryName(_projectCsProjPath)!, ".godot", "mono", "temp", "bin");
+            }
+        }
+
+        public static string LogsDirPathFor(string solution, string configuration)
+            => Path.Combine(BuildLogsDirs, $"{solution.Md5Text()}_{configuration}");
+
+        public static string LogsDirPathFor(string configuration)
+            => LogsDirPathFor(ProjectSlnPath, configuration);
     }
 }

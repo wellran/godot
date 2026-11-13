@@ -1,38 +1,39 @@
-/*************************************************************************/
-/*  gpu_particles_3d.h                                                   */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  gpu_particles_3d.h                                                    */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
-#ifndef PARTICLES_H
-#define PARTICLES_H
+#pragma once
 
 #include "scene/3d/visual_instance_3d.h"
-#include "scene/resources/skin.h"
+#include "scene/resources/3d/skin.h"
+
+class Mesh;
 
 class GPUParticles3D : public GeometryInstance3D {
 private:
@@ -47,10 +48,11 @@ public:
 	};
 
 	enum TransformAlign {
-		TRANSFORM_ALIGN_DISABLED,
-		TRANSFORM_ALIGN_Z_BILLBOARD,
-		TRANSFORM_ALIGN_Y_TO_VELOCITY,
-		TRANSFORM_ALIGN_Z_BILLBOARD_Y_TO_VELOCITY
+		TRANSFORM_ALIGN_DISABLED = RSE::PARTICLES_TRANSFORM_ALIGN_DISABLED,
+		TRANSFORM_ALIGN_Z_BILLBOARD = RSE::PARTICLES_TRANSFORM_ALIGN_Z_BILLBOARD,
+		TRANSFORM_ALIGN_Y_TO_VELOCITY = RSE::PARTICLES_TRANSFORM_ALIGN_Y_TO_VELOCITY,
+		TRANSFORM_ALIGN_Z_BILLBOARD_Y_TO_VELOCITY = RSE::PARTICLES_TRANSFORM_ALIGN_Z_BILLBOARD_Y_TO_VELOCITY,
+		TRANSFORM_ALIGN_LOCAL_BILLBOARD = RSE::PARTICLES_TRANSFORM_ALIGN_LOCAL_BILLBOARD,
 	};
 
 	enum {
@@ -60,32 +62,48 @@ public:
 private:
 	RID particles;
 
-	bool one_shot;
-	int amount;
-	double lifetime;
-	double pre_process_time;
-	real_t explosiveness_ratio;
-	real_t randomness_ratio;
-	double speed_scale;
+	bool emitting = false;
+	bool active = false;
+	bool signal_canceled = false;
+	bool one_shot = false;
+	int amount = 0;
+	float amount_ratio = 1.0;
+	double lifetime = 0.0;
+	double pre_process_time = 0.0;
+	real_t explosiveness_ratio = 0.0;
+	real_t randomness_ratio = 0.0;
+	double speed_scale = 0.0;
 	AABB visibility_aabb;
-	bool local_coords;
-	int fixed_fps;
-	bool fractional_delta;
+	bool local_coords = false;
+	int fixed_fps = 0;
+	bool fractional_delta = false;
 	bool interpolate = true;
 	NodePath sub_emitter;
 	real_t collision_base_size = 0.01;
+	uint32_t seed = 0;
+	bool use_fixed_seed = false;
 
 	bool trail_enabled = false;
-	double trail_length = 0.3;
+	double trail_lifetime = 0.3;
 
 	TransformAlign transform_align = TRANSFORM_ALIGN_DISABLED;
+	RSE::ParticlesTransformAlignCustomSrc transform_align_channel_filter = RSE::ParticlesTransformAlignCustomSrc::PARTICLES_ALIGN_CHANNEL_FILTER_X;
+	RSE::ParticlesTransformAlignAxis transform_align_axis = RSE::ParticlesTransformAlignAxis::PARTICLES_ALIGN_AXIS_Y;
+	bool transform_align_use_velocity = true;
 
 	Ref<Material> process_material;
 
-	DrawOrder draw_order;
+	DrawOrder draw_order = DRAW_ORDER_INDEX;
 
 	Vector<Ref<Mesh>> draw_passes;
 	Ref<Skin> skin;
+
+	double time = 0.0;
+	double emission_time = 0.0;
+	double active_time = 0.0;
+	float interp_to_end_factor = 0;
+	Vector3 previous_velocity;
+	Vector3 previous_position;
 
 	void _attach_sub_emitter();
 
@@ -94,11 +112,16 @@ private:
 protected:
 	static void _bind_methods();
 	void _notification(int p_what);
-	virtual void _validate_property(PropertyInfo &property) const override;
+	void _validate_property(PropertyInfo &p_property) const;
+
+#ifndef DISABLE_DEPRECATED
+	void _restart_bind_compat_92089();
+	void _request_particles_process_bind_compat_109142(real_t p_time);
+	static void _bind_compatibility_methods();
+#endif
 
 public:
 	AABB get_aabb() const override;
-	Vector<Face3> get_faces(uint32_t p_usage_flags) const override;
 
 	void set_emitting(bool p_emitting);
 	void set_amount(int p_amount);
@@ -113,10 +136,12 @@ public:
 	void set_speed_scale(double p_scale);
 	void set_collision_base_size(real_t p_ratio);
 	void set_trail_enabled(bool p_enabled);
-	void set_trail_length(double p_seconds);
+	void set_trail_lifetime(double p_seconds);
+	void set_interp_to_end(float p_interp);
 
 	bool is_emitting() const;
 	int get_amount() const;
+
 	double get_lifetime() const;
 	bool get_one_shot() const;
 	double get_pre_process_time() const;
@@ -128,7 +153,11 @@ public:
 	double get_speed_scale() const;
 	real_t get_collision_base_size() const;
 	bool is_trail_enabled() const;
-	double get_trail_length() const;
+	double get_trail_lifetime() const;
+	float get_interp_to_end() const;
+
+	void set_amount_ratio(float p_ratio);
+	float get_amount_ratio() const;
 
 	void set_fixed_fps(int p_count);
 	int get_fixed_fps() const;
@@ -148,7 +177,7 @@ public:
 	void set_draw_pass_mesh(int p_pass, const Ref<Mesh> &p_mesh);
 	Ref<Mesh> get_draw_pass_mesh(int p_pass) const;
 
-	TypedArray<String> get_configuration_warnings() const override;
+	PackedStringArray get_configuration_warnings() const override;
 
 	void set_sub_emitter(const NodePath &p_path);
 	NodePath get_sub_emitter() const;
@@ -159,19 +188,34 @@ public:
 	void set_transform_align(TransformAlign p_align);
 	TransformAlign get_transform_align() const;
 
-	void restart();
+	void set_transform_align_channel_filter(RSE::ParticlesTransformAlignCustomSrc p_align_channel_filter);
+	RSE::ParticlesTransformAlignCustomSrc get_transform_align_channel_filter() const;
+
+	void set_transform_align_axis(RSE::ParticlesTransformAlignAxis p_axis);
+	RSE::ParticlesTransformAlignAxis get_transform_align_axis() const;
+
+	void restart(bool p_keep_seed = false);
+
+	void set_use_fixed_seed(bool p_use_fixed_seed);
+	bool get_use_fixed_seed() const;
+
+	void set_seed(uint32_t p_seed);
+	uint32_t get_seed() const;
+	void request_particles_process(real_t p_requested_process_time, real_t p_request_process_time_residual = 0.0f);
 
 	enum EmitFlags {
-		EMIT_FLAG_POSITION = RS::PARTICLES_EMIT_FLAG_POSITION,
-		EMIT_FLAG_ROTATION_SCALE = RS::PARTICLES_EMIT_FLAG_ROTATION_SCALE,
-		EMIT_FLAG_VELOCITY = RS::PARTICLES_EMIT_FLAG_VELOCITY,
-		EMIT_FLAG_COLOR = RS::PARTICLES_EMIT_FLAG_COLOR,
-		EMIT_FLAG_CUSTOM = RS::PARTICLES_EMIT_FLAG_CUSTOM
+		EMIT_FLAG_POSITION = RSE::PARTICLES_EMIT_FLAG_POSITION,
+		EMIT_FLAG_ROTATION_SCALE = RSE::PARTICLES_EMIT_FLAG_ROTATION_SCALE,
+		EMIT_FLAG_VELOCITY = RSE::PARTICLES_EMIT_FLAG_VELOCITY,
+		EMIT_FLAG_COLOR = RSE::PARTICLES_EMIT_FLAG_COLOR,
+		EMIT_FLAG_CUSTOM = RSE::PARTICLES_EMIT_FLAG_CUSTOM
 	};
 
 	void emit_particle(const Transform3D &p_transform, const Vector3 &p_velocity, const Color &p_color, const Color &p_custom, uint32_t p_emit_flags);
 
 	AABB capture_aabb() const;
+	void convert_from_particles(Node *p_particles);
+
 	GPUParticles3D();
 	~GPUParticles3D();
 };
@@ -179,5 +223,3 @@ public:
 VARIANT_ENUM_CAST(GPUParticles3D::DrawOrder)
 VARIANT_ENUM_CAST(GPUParticles3D::TransformAlign)
 VARIANT_ENUM_CAST(GPUParticles3D::EmitFlags)
-
-#endif // PARTICLES_H

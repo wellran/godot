@@ -1,41 +1,40 @@
-/*************************************************************************/
-/*  json.h                                                               */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  json.h                                                                */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
-#ifndef JSON_H
-#define JSON_H
+#pragma once
 
-#include "core/object/ref_counted.h"
+#include "core/io/resource.h"
 #include "core/variant/variant.h"
 
-class JSON : public RefCounted {
-	GDCLASS(JSON, RefCounted);
+class JSON : public Resource {
+	GDCLASS(JSON, Resource);
 
 	enum TokenType {
 		TK_CURLY_BRACKET_OPEN,
@@ -63,30 +62,44 @@ class JSON : public RefCounted {
 		Variant value;
 	};
 
+	String text;
 	Variant data;
 	String err_str;
 	int err_line = 0;
 
 	static const char *tk_name[];
 
-	static String _make_indent(const String &p_indent, int p_size);
-	static String _stringify(const Variant &p_var, const String &p_indent, int p_cur_indent, bool p_sort_keys, Set<const void *> &p_markers, bool p_full_precision = false);
-	static Error _get_token(const char32_t *p_str, int &index, int p_len, Token &r_token, int &line, String &r_err_str);
-	static Error _parse_value(Variant &value, Token &token, const char32_t *p_str, int &index, int p_len, int &line, String &r_err_str);
-	static Error _parse_array(Array &array, const char32_t *p_str, int &index, int p_len, int &line, String &r_err_str);
-	static Error _parse_object(Dictionary &object, const char32_t *p_str, int &index, int p_len, int &line, String &r_err_str);
+	static void _add_indent(String &r_result, const String &p_indent, int p_size);
+	static void _stringify(String &r_result, const Variant &p_var, const String &p_indent, int p_cur_indent, bool p_sort_keys, HashSet<const void *> &p_markers, bool p_full_precision);
+	static Error _get_token(const char32_t *p_str, int &r_index, int p_len, Token &r_token, int &r_line, String &r_err_str);
+	static Error _parse_value(Variant &r_value, Token &r_token, const char32_t *p_str, int &r_index, int p_len, int &r_line, int p_depth, String &r_err_str);
+	static Error _parse_array(Array &r_array, const char32_t *p_str, int &r_index, int p_len, int &r_line, int p_depth, String &r_err_str);
+	static Error _parse_object(Dictionary &r_object, const char32_t *p_str, int &r_index, int p_len, int &r_line, int p_depth, String &r_err_str);
 	static Error _parse_string(const String &p_json, Variant &r_ret, String &r_err_str, int &r_err_line);
+
+	static Variant _from_native(const Variant &p_variant, bool p_full_objects, int p_depth);
+	static Variant _to_native(const Variant &p_json, bool p_allow_objects, int p_depth);
 
 protected:
 	static void _bind_methods();
 
 public:
-	String stringify(const Variant &p_var, const String &p_indent = "", bool p_sort_keys = true, bool p_full_precision = false);
-	Error parse(const String &p_json_string);
+	Error parse(const String &p_json_string, bool p_keep_text = false);
+	String get_parsed_text() const;
 
-	inline Variant get_data() const { return data; }
-	inline int get_error_line() const { return err_line; }
-	inline String get_error_message() const { return err_str; }
+	static String stringify(const Variant &p_var, const String &p_indent = "", bool p_sort_keys = true, bool p_full_precision = false);
+	static Variant parse_string(const String &p_json_string);
+
+	_FORCE_INLINE_ static Variant from_native(const Variant &p_variant, bool p_full_objects = false) {
+		return _from_native(p_variant, p_full_objects, 0);
+	}
+	_FORCE_INLINE_ static Variant to_native(const Variant &p_json, bool p_allow_objects = false) {
+		return _to_native(p_json, p_allow_objects, 0);
+	}
+
+	void set_data(const Variant &p_data);
+	_FORCE_INLINE_ Variant get_data() const { return data; }
+
+	_FORCE_INLINE_ int get_error_line() const { return err_line; }
+	_FORCE_INLINE_ String get_error_message() const { return err_str; }
 };
-
-#endif // JSON_H

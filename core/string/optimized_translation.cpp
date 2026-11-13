@@ -1,59 +1,77 @@
-/*************************************************************************/
-/*  optimized_translation.cpp                                            */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  optimized_translation.cpp                                             */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
 #include "optimized_translation.h"
+#include "optimized_translation.compat.inc"
 
+#include "core/object/class_db.h"
 #include "core/templates/pair.h"
 
 extern "C" {
-#include "thirdparty/misc/smaz.h"
+#include <thirdparty/misc/smaz.h>
 }
 
 struct CompressedString {
-	int orig_len;
+	int orig_len = 0;
 	CharString compressed;
-	int offset;
+	int offset = 0;
 };
 
-void OptimizedTranslation::generate(const Ref<Translation> &p_from) {
+bool OptimizedTranslation::generate(const Ref<Translation> &p_from) {
 	// This method compresses a Translation instance.
-	// Right now, it doesn't handle context or plurals, so Translation subclasses using plurals or context (i.e TranslationPO) shouldn't be compressed.
+	// Right now, it doesn't handle context or plurals.
 #ifdef TOOLS_ENABLED
-	ERR_FAIL_COND(p_from.is_null());
+	ERR_FAIL_COND_V(p_from.is_null(), false);
+
 	List<StringName> keys;
-	p_from->get_message_list(&keys);
+	{
+		List<StringName> raw_keys;
+		p_from->get_message_list(&raw_keys);
+
+		for (const StringName &key : raw_keys) {
+			const String key_str = key.string();
+			int p = key_str.find_char(0x04);
+			if (p == -1) {
+				keys.push_back(key);
+			} else {
+				const String &msgctxt = key_str.substr(0, p);
+				const String &msgid = key_str.substr(p + 1);
+				WARN_PRINT(vformat("OptimizedTranslation does not support context, ignoring message '%s' with context '%s'.", msgid, msgctxt));
+			}
+		}
+	}
 
 	int size = Math::larger_prime(keys.size());
 
 	Vector<Vector<Pair<int, CharString>>> buckets;
-	Vector<Map<uint32_t, int>> table;
+	Vector<HashMap<uint32_t, int>> table;
 	Vector<uint32_t> hfunc_table;
 	Vector<CompressedString> compressed;
 
@@ -67,7 +85,7 @@ void OptimizedTranslation::generate(const Ref<Translation> &p_from) {
 
 	for (const StringName &E : keys) {
 		//hash string
-		CharString cs = E.operator String().utf8();
+		CharString cs = E.string().utf8();
 		uint32_t h = hash(0, cs.get_data());
 		Pair<int, CharString> p;
 		p.first = idx;
@@ -75,27 +93,27 @@ void OptimizedTranslation::generate(const Ref<Translation> &p_from) {
 		buckets.write[h % size].push_back(p);
 
 		//compress string
-		CharString src_s = p_from->get_message(E).operator String().utf8();
+		CharString src_s = p_from->get_message(E).string().utf8();
 		CompressedString ps;
 		ps.orig_len = src_s.size();
 		ps.offset = total_compression_size;
 
 		if (ps.orig_len != 0) {
 			CharString dst_s;
-			dst_s.resize(src_s.size());
+			dst_s.resize_uninitialized(src_s.size());
 			int ret = smaz_compress(src_s.get_data(), src_s.size(), dst_s.ptrw(), src_s.size());
 			if (ret >= src_s.size()) {
 				//if compressed is larger than original, just use original
 				ps.orig_len = src_s.size();
 				ps.compressed = src_s;
 			} else {
-				dst_s.resize(ret);
+				dst_s.resize_uninitialized(ret);
 				//ps.orig_len=;
 				ps.compressed = dst_s;
 			}
 		} else {
 			ps.orig_len = 1;
-			ps.compressed.resize(1);
+			ps.compressed.resize_uninitialized(1);
 			ps.compressed[0] = 0;
 		}
 
@@ -108,9 +126,9 @@ void OptimizedTranslation::generate(const Ref<Translation> &p_from) {
 
 	for (int i = 0; i < size; i++) {
 		const Vector<Pair<int, CharString>> &b = buckets[i];
-		Map<uint32_t, int> &t = table.write[i];
+		HashMap<uint32_t, int> &t = table.write[i];
 
-		if (b.size() == 0) {
+		if (b.is_empty()) {
 			continue;
 		}
 
@@ -133,7 +151,7 @@ void OptimizedTranslation::generate(const Ref<Translation> &p_from) {
 		bucket_table_size += 2 + b.size() * 4;
 	}
 
-	ERR_FAIL_COND(bucket_table_size == 0);
+	ERR_FAIL_COND_V(bucket_table_size == 0, false);
 
 	hash_table.resize(size);
 	bucket_table.resize(bucket_table_size);
@@ -147,8 +165,8 @@ void OptimizedTranslation::generate(const Ref<Translation> &p_from) {
 	int btindex = 0;
 
 	for (int i = 0; i < size; i++) {
-		const Map<uint32_t, int> &t = table[i];
-		if (t.size() == 0) {
+		const HashMap<uint32_t, int> &t = table[i];
+		if (t.is_empty()) {
 			htw[i] = 0xFFFFFFFF; //nothing
 			continue;
 		}
@@ -172,21 +190,24 @@ void OptimizedTranslation::generate(const Ref<Translation> &p_from) {
 		memcpy(&cw[compressed[i].offset], compressed[i].compressed.get_data(), compressed[i].compressed.size());
 	}
 
-	ERR_FAIL_COND(btindex != bucket_table_size);
+	ERR_FAIL_COND_V(btindex != bucket_table_size, false);
 	set_locale(p_from->get_locale());
 
+	return true;
+#else
+	return false;
 #endif
 }
 
 bool OptimizedTranslation::_set(const StringName &p_name, const Variant &p_value) {
-	String name = p_name.operator String();
-	if (name == "hash_table") {
+	String prop_name = p_name.string();
+	if (prop_name == "hash_table") {
 		hash_table = p_value;
-	} else if (name == "bucket_table") {
+	} else if (prop_name == "bucket_table") {
 		bucket_table = p_value;
-	} else if (name == "strings") {
+	} else if (prop_name == "strings") {
 		strings = p_value;
-	} else if (name == "load_from") {
+	} else if (prop_name == "load_from") {
 		generate(p_value);
 	} else {
 		return false;
@@ -196,18 +217,44 @@ bool OptimizedTranslation::_set(const StringName &p_name, const Variant &p_value
 }
 
 bool OptimizedTranslation::_get(const StringName &p_name, Variant &r_ret) const {
-	String name = p_name.operator String();
-	if (name == "hash_table") {
+	String prop_name = p_name.string();
+	if (prop_name == "hash_table") {
 		r_ret = hash_table;
-	} else if (name == "bucket_table") {
+	} else if (prop_name == "bucket_table") {
 		r_ret = bucket_table;
-	} else if (name == "strings") {
+	} else if (prop_name == "strings") {
 		r_ret = strings;
 	} else {
 		return false;
 	}
 
 	return true;
+}
+
+const OptimizedTranslation::Bucket *OptimizedTranslation::_get_bucket(uint32_t p_offset) const {
+	const uint64_t bucket_table_size = bucket_table.size();
+	ERR_FAIL_COND_V_MSG((uint64_t)p_offset + 2 > bucket_table_size, nullptr, "Invalid bucket offset, corrupt translation.");
+
+	const Bucket *bucket = (const Bucket *)&bucket_table.ptr()[p_offset];
+	ERR_FAIL_COND_V_MSG(bucket->size < 0 || (uint64_t)p_offset + 2 + (uint64_t)bucket->size * 4 > bucket_table_size, nullptr, "Invalid bucket size, corrupt translation.");
+	return bucket;
+}
+
+String OptimizedTranslation::_get_string(const Bucket::Elem &p_elem) const {
+	ERR_FAIL_COND_V_MSG((uint64_t)p_elem.str_offset + p_elem.comp_size > (uint64_t)strings.size(), String(), "Invalid string offset, corrupt translation.");
+	const char *sptr = (const char *)strings.ptr();
+
+	if (p_elem.comp_size == p_elem.uncomp_size) {
+		return String::utf8(&sptr[p_elem.str_offset], p_elem.uncomp_size);
+	}
+
+	ERR_FAIL_COND_V_MSG(p_elem.uncomp_size > INT32_MAX, String(), "Invalid string size, corrupt translation.");
+	CharString uncomp;
+	Error err = uncomp.resize_uninitialized(p_elem.uncomp_size);
+	ERR_FAIL_COND_V(err != OK, String());
+	int len = smaz_decompress(&sptr[p_elem.str_offset], p_elem.comp_size, uncomp.ptrw(), p_elem.uncomp_size);
+	ERR_FAIL_COND_V_MSG(len > (int)p_elem.uncomp_size, String(), "Invalid compressed string, corrupt translation.");
+	return String::utf8(uncomp.get_data(), len);
 }
 
 StringName OptimizedTranslation::get_message(const StringName &p_src_text, const StringName &p_context) const {
@@ -219,15 +266,11 @@ StringName OptimizedTranslation::get_message(const StringName &p_src_text, const
 		return StringName();
 	}
 
-	CharString str = p_src_text.operator String().utf8();
+	CharString str = p_src_text.string().utf8();
 	uint32_t h = hash(0, str.get_data());
 
 	const int *htr = hash_table.ptr();
 	const uint32_t *htptr = (const uint32_t *)&htr[0];
-	const int *btr = bucket_table.ptr();
-	const uint32_t *btptr = (const uint32_t *)&btr[0];
-	const uint8_t *sr = strings.ptr();
-	const char *sptr = (const char *)&sr[0];
 
 	uint32_t p = htptr[h % htsize];
 
@@ -235,14 +278,17 @@ StringName OptimizedTranslation::get_message(const StringName &p_src_text, const
 		return StringName(); //nothing
 	}
 
-	const Bucket &bucket = *(const Bucket *)&btptr[p];
+	const Bucket *bucket = _get_bucket(p);
+	if (unlikely(!bucket)) {
+		return StringName(); // Helper already prints an error.
+	}
 
-	h = hash(bucket.func, str.get_data());
+	h = hash(bucket->func, str.get_data());
 
 	int idx = -1;
 
-	for (int i = 0; i < bucket.size; i++) {
-		if (bucket.elem[i].key == h) {
+	for (int i = 0; i < bucket->size; i++) {
+		if (bucket->elem[i].key == h) {
 			idx = i;
 			break;
 		}
@@ -252,19 +298,28 @@ StringName OptimizedTranslation::get_message(const StringName &p_src_text, const
 		return StringName();
 	}
 
-	if (bucket.elem[idx].comp_size == bucket.elem[idx].uncomp_size) {
-		String rstr;
-		rstr.parse_utf8(&sptr[bucket.elem[idx].str_offset], bucket.elem[idx].uncomp_size);
+	return _get_string(bucket->elem[idx]);
+}
 
-		return rstr;
-	} else {
-		CharString uncomp;
-		uncomp.resize(bucket.elem[idx].uncomp_size + 1);
-		smaz_decompress(&sptr[bucket.elem[idx].str_offset], bucket.elem[idx].comp_size, uncomp.ptrw(), bucket.elem[idx].uncomp_size);
-		String rstr;
-		rstr.parse_utf8(uncomp.get_data());
-		return rstr;
+Vector<String> OptimizedTranslation::get_translated_message_list() const {
+	Vector<String> msgs;
+
+	const int *htr = hash_table.ptr();
+	const uint32_t *htptr = (const uint32_t *)&htr[0];
+
+	for (int i = 0; i < hash_table.size(); i++) {
+		uint32_t p = htptr[i];
+		if (p != 0xFFFFFFFF) {
+			const Bucket *bucket = _get_bucket(p);
+			if (unlikely(!bucket)) {
+				return Vector<String>(); // Helper already prints an error.
+			}
+			for (int j = 0; j < bucket->size; j++) {
+				msgs.push_back(_get_string(bucket->elem[j]));
+			}
+		}
 	}
+	return msgs;
 }
 
 StringName OptimizedTranslation::get_plural_message(const StringName &p_src_text, const StringName &p_plural_text, int p_n, const StringName &p_context) const {
@@ -272,11 +327,25 @@ StringName OptimizedTranslation::get_plural_message(const StringName &p_src_text
 	return get_message(p_src_text, p_context);
 }
 
+Vector<String> OptimizedTranslation::_get_message_list() const {
+	WARN_PRINT_ONCE("OptimizedTranslation does not store the message texts to be translated.");
+	return {};
+}
+
+void OptimizedTranslation::get_message_list(List<StringName> *r_messages) const {
+	WARN_PRINT_ONCE("OptimizedTranslation does not store the message texts to be translated.");
+}
+
+int OptimizedTranslation::get_message_count() const {
+	WARN_PRINT_ONCE("OptimizedTranslation does not store the message texts to be translated.");
+	return 0;
+}
+
 void OptimizedTranslation::_get_property_list(List<PropertyInfo> *p_list) const {
-	p_list->push_back(PropertyInfo(Variant::PACKED_INT32_ARRAY, "hash_table"));
-	p_list->push_back(PropertyInfo(Variant::PACKED_INT32_ARRAY, "bucket_table"));
-	p_list->push_back(PropertyInfo(Variant::PACKED_BYTE_ARRAY, "strings"));
-	p_list->push_back(PropertyInfo(Variant::OBJECT, "load_from", PROPERTY_HINT_RESOURCE_TYPE, "Translation", PROPERTY_USAGE_EDITOR));
+	p_list->push_back(PropertyInfo(Variant::PACKED_INT32_ARRAY, "hash_table", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NO_EDITOR));
+	p_list->push_back(PropertyInfo(Variant::PACKED_INT32_ARRAY, "bucket_table", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NO_EDITOR));
+	p_list->push_back(PropertyInfo(Variant::PACKED_BYTE_ARRAY, "strings", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NO_EDITOR));
+	p_list->push_back(PropertyInfo(Variant::OBJECT, "load_from", PROPERTY_HINT_RESOURCE_TYPE, Translation::get_class_static(), PROPERTY_USAGE_EDITOR));
 }
 
 void OptimizedTranslation::_bind_methods() {

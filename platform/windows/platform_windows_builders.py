@@ -1,22 +1,13 @@
-"""Functions used to generate source files during build time
+"""Functions used to generate source files during build time"""
 
-All such functions are invoked in a subprocess on Windows to prevent build flakiness.
-
-"""
 import os
-from platform_methods import subprocess_main
+import subprocess
 
 
 def make_debug_mingw(target, source, env):
-    mingw_prefix = ""
-    if env["bits"] == "32":
-        mingw_prefix = env["mingw_prefix_32"]
-    else:
-        mingw_prefix = env["mingw_prefix_64"]
-    os.system(mingw_prefix + "objcopy --only-keep-debug {0} {0}.debugsymbols".format(target[0]))
-    os.system(mingw_prefix + "strip --strip-debug --strip-unneeded {0}".format(target[0]))
-    os.system(mingw_prefix + "objcopy --add-gnu-debuglink={0}.debugsymbols {0}".format(target[0]))
-
-
-if __name__ == "__main__":
-    subprocess_main(globals())
+    dst = str(target[0])
+    # Force separate debug symbols if executable size is larger than 1.9 GB.
+    if env["separate_debug_symbols"] or os.stat(dst).st_size >= 2040109465:
+        subprocess.run([env["OBJCOPY"], "--only-keep-debug", dst, f"{dst}.debugsymbols"], check=True)
+        subprocess.run([env["STRIP"], "--strip-debug", "--strip-unneeded", dst], check=True)
+        subprocess.run([env["OBJCOPY"], f"--add-gnu-debuglink={dst}.debugsymbols", dst], check=True)

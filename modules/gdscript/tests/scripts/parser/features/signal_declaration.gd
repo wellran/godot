@@ -1,4 +1,4 @@
-#GDTEST_OK
+@warning_ignore_start("unused_signal")
 
 # No parentheses.
 signal a
@@ -6,7 +6,7 @@ signal a
 # No parameters.
 signal b()
 
-# With paramters.
+# With parameters.
 signal c(a, b, c)
 
 # With parameters multiline.
@@ -15,6 +15,9 @@ signal d(
 	b,
 	c,
 )
+
+# With type hints.
+signal e(a: int, b: Variant, c: Node)
 
 func test():
 	print("Ok")

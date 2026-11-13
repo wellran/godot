@@ -85,6 +85,195 @@ typedef struct {
     uint32_t tokenStringOffset, groupsOffset, groupStringOffset, algNamesOffset;
 } UCharNames;
 
+namespace {
+// For a character name `name`, a query string `query` matches `name` under UAX44-LM2 if and only if
+// the following returns true:
+//     auto matcher = CharacterNameQuery(query).matcher();
+//     for (const char c : name) {
+//         if (!matcher.consistentWith(c)) {
+//             return false;
+//         }
+//     }
+//     return matcher.matches();
+// `name` must be an exact character name, in particular, all uppercase, with no underscores, no
+// double hyphens, no isolated hyphens.  There are no constraints on `query`; for instance, this
+// class will match name="ZANABAZAR SQUARE LETTER -A" with query="Zanabazar-square_letter_-A".
+// `Matcher::consistentWith` is not retryable: once it returns false, the `Matcher` should not be
+// used again.
+class CharacterNameQuery {
+  public:
+    class Matcher {
+      public:
+        // `query` must outlive the constructed object.
+        Matcher(const CharacterNameQuery& query)
+            : query(query), skeletonIterator(query.skeleton.begin()) {}
+
+        bool consistentWith(char c) {
+            // Instead of constructing a skeleton from the name as in the constructor of
+            // CharacterNameQuery, we check character-by-character if the skeleton we would
+            // construct from the name would be consistent with `query->skeleton`.
+            // We require that this be called with characters from an actual character name, so we
+            // need not worry about case or underscores here.
+
+            if (skeletonIterator == query.skeleton.end()) {
+                return false;
+            }
+            if (c == ' ') {
+                // The last hyphen was word-final; check that there is a corresponding significant
+                // hyphen in the skeleton.  A hyphen in a character name cannot be both word-final
+                // and word-initial by rule R3 in
+                // https://unicode.org/versions/Unicode17.0.0/core-spec/chapter-4/#G135165, so we do
+                // not have to worry about checking the skeleton for the same significant hyphen
+                // twice.
+                if (lastChar == '-') {
+                    if (*skeletonIterator++ != lastChar) {
+                        return false;
+                    }
+                }
+                lastChar = c;
+                return true;
+            } else if (c == '-') {
+                if (lastChar == ' ' ||
+                    (query.is1180 && skeletonIterator == query.skeleton.end() - 2)) {
+                    // If lastChar == ' ', this is a word-initial hyphen, so we know it is
+                    // significant.  Check that we are expecting it.
+                    // If we are looking for U+1180 and we matched everything but the trailing -E,
+                    // this could be that hyphen; move past it.  This could turn out to be a
+                    // different character name if there is something other than E afterwards, in
+                    // which case we should in principle have ignored the hyphen; but then since the
+                    // suffixes will differ, we will return false anyway.
+                    // For example, when searching for HANGUL JUNGSEONG O-E and checking consistency
+                    // with HANGUL JUNGSEONG O-U, if we computed both skeleta and compared them,
+                    // the skeleta would be HANGULJUNGSEONGO-E and HANGULJUNGSEONGOU, and the
+                    // comparison would fail on - vs. U.
+                    // Here, while feeding HANGUL JUNGSEONG O-U character-by-character, we assume
+                    // its skeleton would be HANGULJUNGSEONGO-, and fail on E vs. U.
+                    if (*skeletonIterator++ != c) {
+                        return false;
+                    }
+                }
+                // If lastChar is not ' ', we do not know whether this hyphen is word-final, so we
+                // cannot check against the skeleton.
+                lastChar = c;
+                return true;
+            } else {
+                if (*skeletonIterator++ != c) {
+                    return false;
+                }
+                lastChar = c;
+                return true;
+            }
+        }
+
+        bool consistentWith(const std::string_view substring) {
+            for (const char c : substring) {
+                if (!consistentWith(c)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        bool matches() {
+            // If a character name could end with a HYPHEN-MINUS, that HYPHEN-MINUS would be
+            // significant: we would need to check that if lastChar == '-',
+            // *skeletonIterator == '-', and then advance skeletonIterator.
+            // However, this is disallowed by rule R3 in
+            // https://unicode.org/versions/Unicode17.0.0/core-spec/chapter-4/#G135165.
+            U_ASSERT(lastChar != '-');
+            return skeletonIterator == query.skeleton.end();
+        }
+
+        std::string_view remainingSignificantCharacters() const {
+            return query.skeleton.substr(skeletonIterator - query.skeleton.begin());
+        }
+
+      private:
+        const CharacterNameQuery& query;
+        std::string_view::const_iterator skeletonIterator;
+        // Initialized to ' ' so that a leading hyphen is treated like a hyphen that follows a
+        // space (non-medial and thus not ignorable).  There are in fact no leading hyphens in
+        // character names by rule R3 in
+        // https://unicode.org/versions/Unicode17.0.0/core-spec/chapter-4/#G135165, and technically
+        // we do not read the value of this variable before writing to it because the first call to
+        // consistentWith never has c=' ' either by R4, but it seems cleanest to initialize lastChar
+        // nonetheless.
+        char lastChar = ' ';
+    };
+
+    explicit CharacterNameQuery(std::string_view query) {
+        // Construct a skeleton obtained by
+        // 1. removing medial hyphens (except the one in the name of U+1180);
+        // 2. removing spaces and underscores;
+        // 3. uppercasing,
+        // as described in https://www.unicode.org/reports/tr44/#UAX44-LM2.
+        // We do all three in a single pass.
+        char *skeletonLimit = skeletonData;
+        for (std::size_t i = 0; i < query.length(); ++i) {
+            U_ASSERT(skeletonLimit < skeletonData + sizeof(skeletonData));
+            if (skeletonLimit >= skeletonData + sizeof(skeletonData)) {
+                // The caller should limit the query length appropriately; if they do not, assert,
+                // and if assertions are disabled, query for the empty string (which will quickly
+                // find nothing).
+                skeletonLimit = skeletonData;
+                break;
+            }
+            if (query[i] == ' ' || query[i] == '_') {
+                continue;
+            }
+            if (query[i] == '-') {
+                bool isMedial;
+                bool is1180MedialHyphen = false;
+                if (i == 0 || i == query.length() - 1) {
+                    isMedial = false;
+                } else {
+                    isMedial = isASCIILetterOrDigit(query[i - 1]) && isASCIILetterOrDigit(query[i + 1]);
+                }
+                // A medial hyphen is the hyphen in the name of U+1180 HANGUL JUNGSEONG O-E if what
+                // comes before skeletonizes to HANGULJUNGSEONGO and what comes after skeletonizes
+                // to E.
+                if (isMedial && uprv_toupper(query[i + 1]) == 'E' &&
+                    std::string_view(skeletonData, skeletonLimit - skeletonData) == "HANGULJUNGSEONGO") {
+                    is1180MedialHyphen = true;
+                    // If there is anything significant after the E, the part of the name after the
+                    // hyphen does not skeletonize to E, and thus this is not U+1180.
+                    // There can be no hyphens there: if there is one, it is either non-medial, or
+                    // there is another letter beyond the E.  The insignificant characters are thus
+                    // only spaces and underscores.
+                    for (std::size_t j = i + 2; j < query.length(); ++j) {
+                        if (query[j] != ' ' && query[j] != '_') {
+                            is1180MedialHyphen = false;
+                        }
+                    }
+                }
+                if (!isMedial || is1180MedialHyphen) {
+                    *skeletonLimit++ = query[i];
+                }
+            } else {
+                *skeletonLimit++ = uprv_toupper(query[i]);
+            }
+        }
+        skeleton = std::string_view(skeletonData, skeletonLimit - skeletonData);
+        // This can be true even if we never went through the is1180MedialHyphen path, e.g., if the
+        // query was "HANGUL JUNGSEONG O -E".
+        is1180 = skeleton == "HANGULJUNGSEONGO-E";
+    }
+
+    Matcher matcher() const {
+        return Matcher(*this);
+    }
+
+private:
+    static bool isASCIILetterOrDigit(const char c) {
+        return uprv_isASCIILetter(c) || (c >= '0' && c <= '9');
+    }
+
+    char skeletonData[120];
+    std::string_view skeleton;
+    bool is1180;
+};
+} // namespace
+
 /*
  * Get the groups table from a UCharNames struct.
  * The groups table consists of one uint16_t groupCount followed by
@@ -97,15 +286,15 @@ typedef struct {
 #define GET_GROUPS(names) (const uint16_t *)((const char *)names+names->groupsOffset)
 
 typedef struct {
-    const char *otherName;
+    const CharacterNameQuery *otherName;
     UChar32 code;
 } FindName;
 
-#define DO_FIND_NAME NULL
+#define DO_FIND_NAME nullptr
 
-static UDataMemory *uCharNamesData=NULL;
-static UCharNames *uCharNames=NULL;
-static icu::UInitOnce gCharNamesInitOnce = U_INITONCE_INITIALIZER;
+static UDataMemory *uCharNamesData=nullptr;
+static UCharNames *uCharNames=nullptr;
+static icu::UInitOnce gCharNamesInitOnce {};
 
 /*
  * Maximum length of character names (regular & 1.0).
@@ -162,25 +351,25 @@ static const char * const charCatNames[U_CHAR_EXTENDED_CATEGORY_COUNT] = {
 
 /* implementation ----------------------------------------------------------- */
 
-static UBool U_CALLCONV unames_cleanup(void)
+static UBool U_CALLCONV unames_cleanup()
 {
     if(uCharNamesData) {
         udata_close(uCharNamesData);
-        uCharNamesData = NULL;
+        uCharNamesData = nullptr;
     }
     if(uCharNames) {
-        uCharNames = NULL;
+        uCharNames = nullptr;
     }
     gCharNamesInitOnce.reset();
     gMaxNameLength=0;
-    return TRUE;
+    return true;
 }
 
 static UBool U_CALLCONV
 isAcceptable(void * /*context*/,
              const char * /*type*/, const char * /*name*/,
              const UDataInfo *pInfo) {
-    return (UBool)(
+    return
         pInfo->size>=20 &&
         pInfo->isBigEndian==U_IS_BIG_ENDIAN &&
         pInfo->charsetFamily==U_CHARSET_FAMILY &&
@@ -188,17 +377,17 @@ isAcceptable(void * /*context*/,
         pInfo->dataFormat[1]==0x6e &&
         pInfo->dataFormat[2]==0x61 &&
         pInfo->dataFormat[3]==0x6d &&
-        pInfo->formatVersion[0]==1);
+        pInfo->formatVersion[0]==1;
 }
 
 static void U_CALLCONV
 loadCharNames(UErrorCode &status) {
-    U_ASSERT(uCharNamesData == NULL);
-    U_ASSERT(uCharNames == NULL);
+    U_ASSERT(uCharNamesData == nullptr);
+    U_ASSERT(uCharNames == nullptr);
 
-    uCharNamesData = udata_openChoice(NULL, DATA_TYPE, DATA_NAME, isAcceptable, NULL, &status);
+    uCharNamesData = udata_openChoice(nullptr, DATA_TYPE, DATA_NAME, isAcceptable, nullptr, &status);
     if(U_FAILURE(status)) {
-        uCharNamesData = NULL;
+        uCharNamesData = nullptr;
     } else {
         uCharNames = (UCharNames *)udata_getMemory(uCharNamesData);
     }
@@ -238,9 +427,9 @@ static uint16_t
 expandName(UCharNames *names,
            const uint8_t *name, uint16_t nameLength, UCharNameChoice nameChoice,
            char *buffer, uint16_t bufferLength) {
-    uint16_t *tokens=(uint16_t *)names+8;
+    uint16_t* tokens = reinterpret_cast<uint16_t*>(names) + 8;
     uint16_t token, tokenCount=*tokens++, bufferPos=0;
-    uint8_t *tokenStrings=(uint8_t *)names+names->tokenStringOffset;
+    uint8_t* tokenStrings = reinterpret_cast<uint8_t*>(names) + names->tokenStringOffset;
     uint8_t c;
 
     if(nameChoice!=U_UNICODE_CHAR_NAME && nameChoice!=U_EXTENDED_CHAR_NAME) {
@@ -248,7 +437,7 @@ expandName(UCharNames *names,
          * skip the modern name if it is not requested _and_
          * if the semicolon byte value is a character, not a token number
          */
-        if((uint8_t)';'>=tokenCount || tokens[(uint8_t)';']==(uint16_t)(-1)) {
+        if (static_cast<uint8_t>(';') >= tokenCount || tokens[static_cast<uint8_t>(';')] == static_cast<uint16_t>(-1)) {
             int fieldIndex= nameChoice==U_ISO_COMMENT ? 2 : nameChoice;
             do {
                 while(nameLength>0) {
@@ -283,24 +472,16 @@ expandName(UCharNames *names,
             }
         } else {
             token=tokens[c];
-            if(token==(uint16_t)(-2)) {
+            if (token == static_cast<uint16_t>(-2)) {
                 /* this is a lead byte for a double-byte token */
                 token=tokens[c<<8|*name++];
                 --nameLength;
             }
-            if(token==(uint16_t)(-1)) {
+            if (token == static_cast<uint16_t>(-1)) {
                 if(c!=';') {
                     /* explicit letter */
                     WRITE_CHAR(buffer, bufferLength, bufferPos, c);
                 } else {
-                    /* stop, but skip the semicolon if we are seeking
-                       extended names and there was no 2.0 name but there
-                       is a 1.0 name. */
-                    if(!bufferPos && nameChoice == U_EXTENDED_CHAR_NAME) {
-                        if ((uint8_t)';'>=tokenCount || tokens[(uint8_t)';']==(uint16_t)(-1)) {
-                            continue;
-                        }
-                    }
                     /* finished */
                     break;
                 }
@@ -330,19 +511,19 @@ expandName(UCharNames *names,
 static UBool
 compareName(UCharNames *names,
             const uint8_t *name, uint16_t nameLength, UCharNameChoice nameChoice,
-            const char *otherName) {
-    uint16_t *tokens=(uint16_t *)names+8;
+            const CharacterNameQuery& otherName) {
+    uint16_t* tokens = reinterpret_cast<uint16_t*>(names) + 8;
     uint16_t token, tokenCount=*tokens++;
-    uint8_t *tokenStrings=(uint8_t *)names+names->tokenStringOffset;
+    uint8_t* tokenStrings = reinterpret_cast<uint8_t*>(names) + names->tokenStringOffset;
     uint8_t c;
-    const char *origOtherName = otherName;
+    auto matcher = otherName.matcher();
 
     if(nameChoice!=U_UNICODE_CHAR_NAME && nameChoice!=U_EXTENDED_CHAR_NAME) {
         /*
          * skip the modern name if it is not requested _and_
          * if the semicolon byte value is a character, not a token number
          */
-        if((uint8_t)';'>=tokenCount || tokens[(uint8_t)';']==(uint16_t)(-1)) {
+        if (static_cast<uint8_t>(';') >= tokenCount || tokens[static_cast<uint8_t>(';')] == static_cast<uint16_t>(-1)) {
             int fieldIndex= nameChoice==U_ISO_COMMENT ? 2 : nameChoice;
             do {
                 while(nameLength>0) {
@@ -370,8 +551,8 @@ compareName(UCharNames *names,
         if(c>=tokenCount) {
             if(c!=';') {
                 /* implicit letter */
-                if((char)c!=*otherName++) {
-                    return FALSE;
+                if (!matcher.consistentWith(c)) {
+                    return false;
                 }
             } else {
                 /* finished */
@@ -379,43 +560,32 @@ compareName(UCharNames *names,
             }
         } else {
             token=tokens[c];
-            if(token==(uint16_t)(-2)) {
+            if (token == static_cast<uint16_t>(-2)) {
                 /* this is a lead byte for a double-byte token */
                 token=tokens[c<<8|*name++];
                 --nameLength;
             }
-            if(token==(uint16_t)(-1)) {
+            if (token == static_cast<uint16_t>(-1)) {
                 if(c!=';') {
                     /* explicit letter */
-                    if((char)c!=*otherName++) {
-                        return FALSE;
+                    if (!matcher.consistentWith(c)) {
+                        return false;
                     }
                 } else {
-                    /* stop, but skip the semicolon if we are seeking
-                       extended names and there was no 2.0 name but there
-                       is a 1.0 name. */
-                    if(otherName == origOtherName && nameChoice == U_EXTENDED_CHAR_NAME) {
-                        if ((uint8_t)';'>=tokenCount || tokens[(uint8_t)';']==(uint16_t)(-1)) {
-                            continue;
-                        }
-                    }
                     /* finished */
                     break;
                 }
             } else {
                 /* write token word */
-                uint8_t *tokenString=tokenStrings+token;
-                while((c=*tokenString++)!=0) {
-                    if((char)c!=*otherName++) {
-                        return FALSE;
-                    }
+                if (!matcher.consistentWith(reinterpret_cast<const char *>(tokenStrings + token))) {
+                    return false;
                 }
             }
         }
     }
 
     /* complete match? */
-    return (UBool)(*otherName==0);
+    return matcher.matches();
 }
 
 static uint8_t getCharCat(UChar32 cp) {
@@ -462,7 +632,7 @@ static uint16_t getExtName(uint32_t code, char *buffer, uint16_t bufferLength) {
     if (ndigits < 4)
         ndigits = 4;
     for (cp = code, i = ndigits; (cp || i > 0) && bufferLength; cp >>= 4, bufferLength--) {
-        uint8_t v = (uint8_t)(cp & 0xf);
+        uint8_t v = static_cast<uint8_t>(cp & 0xf);
         buffer[--i] = (v < 10 ? '0' + v : 'A' + v - 10);
     }
     buffer += ndigits;
@@ -482,14 +652,14 @@ static uint16_t getExtName(uint32_t code, char *buffer, uint16_t bufferLength) {
 static const uint16_t *
 getGroup(UCharNames *names, uint32_t code) {
     const uint16_t *groups=GET_GROUPS(names);
-    uint16_t groupMSB=(uint16_t)(code>>GROUP_SHIFT),
+    uint16_t groupMSB = static_cast<uint16_t>(code >> GROUP_SHIFT),
              start=0,
              limit=*groups++,
              number;
 
     /* binary search for the group of names that contains the one for code */
     while(start<limit-1) {
-        number=(uint16_t)((start+limit)/2);
+        number = static_cast<uint16_t>((start + limit) / 2);
         if(groupMSB<groups[number*GROUP_LENGTH+GROUP_MSB]) {
             limit=number;
         } else {
@@ -525,14 +695,14 @@ expandGroupLengths(const uint8_t *s,
         /* read even nibble - MSBs of lengthByte */
         if(length>=12) {
             /* double-nibble length spread across two bytes */
-            length=(uint16_t)(((length&0x3)<<4|lengthByte>>4)+12);
+            length = static_cast<uint16_t>(((length & 0x3) << 4 | lengthByte >> 4) + 12);
             lengthByte&=0xf;
         } else if((lengthByte /* &0xf0 */)>=0xc0) {
             /* double-nibble length spread across this one byte */
-            length=(uint16_t)((lengthByte&0x3f)+12);
+            length = static_cast<uint16_t>((lengthByte & 0x3f) + 12);
         } else {
             /* single-nibble length in MSBs */
-            length=(uint16_t)(lengthByte>>4);
+            length = static_cast<uint16_t>(lengthByte >> 4);
             lengthByte&=0xf;
         }
 
@@ -568,7 +738,7 @@ expandGroupName(UCharNames *names, const uint16_t *group,
                 uint16_t lineNumber, UCharNameChoice nameChoice,
                 char *buffer, uint16_t bufferLength) {
     uint16_t offsets[LINES_PER_GROUP+2], lengths[LINES_PER_GROUP+2];
-    const uint8_t *s=(uint8_t *)names+names->groupStringOffset+GET_GROUP_OFFSET(group);
+    const uint8_t* s = reinterpret_cast<uint8_t*>(names) + names->groupStringOffset + GET_GROUP_OFFSET(group);
     s=expandGroupLengths(s, offsets, lengths);
     return expandName(names, s+offsets[lineNumber], lengths[lineNumber], nameChoice,
                       buffer, bufferLength);
@@ -578,8 +748,8 @@ static uint16_t
 getName(UCharNames *names, uint32_t code, UCharNameChoice nameChoice,
         char *buffer, uint16_t bufferLength) {
     const uint16_t *group=getGroup(names, code);
-    if((uint16_t)(code>>GROUP_SHIFT)==group[GROUP_MSB]) {
-        return expandGroupName(names, group, (uint16_t)(code&GROUP_MASK), nameChoice,
+    if (static_cast<uint16_t>(code >> GROUP_SHIFT) == group[GROUP_MSB]) {
+        return expandGroupName(names, group, static_cast<uint16_t>(code & GROUP_MASK), nameChoice,
                                buffer, bufferLength);
     } else {
         /* group not found */
@@ -601,7 +771,7 @@ enumGroupNames(UCharNames *names, const uint16_t *group,
                UEnumCharNamesFn *fn, void *context,
                UCharNameChoice nameChoice) {
     uint16_t offsets[LINES_PER_GROUP+2], lengths[LINES_PER_GROUP+2];
-    const uint8_t *s=(uint8_t *)names+names->groupStringOffset+GET_GROUP_OFFSET(group);
+    const uint8_t* s = reinterpret_cast<uint8_t*>(names) + names->groupStringOffset + GET_GROUP_OFFSET(group);
 
     s=expandGroupLengths(s, offsets, lengths);
     if(fn!=DO_FIND_NAME) {
@@ -616,22 +786,22 @@ enumGroupNames(UCharNames *names, const uint16_t *group,
             /* here, we assume that the buffer is large enough */
             if(length>0) {
                 if(!fn(context, start, nameChoice, buffer, length)) {
-                    return FALSE;
+                    return false;
                 }
             }
             ++start;
         }
     } else {
-        const char *otherName=((FindName *)context)->otherName;
+        const CharacterNameQuery& otherName = *static_cast<FindName*>(context)->otherName;
         while(start<=end) {
             if(compareName(names, s+offsets[start&GROUP_MASK], lengths[start&GROUP_MASK], nameChoice, otherName)) {
-                ((FindName *)context)->code=start;
-                return FALSE;
+                static_cast<FindName*>(context)->code = start;
+                return false;
             }
             ++start;
         }
     }
-    return TRUE;
+    return true;
 }
 
 /*
@@ -653,14 +823,14 @@ enumExtNames(UChar32 start, UChar32 end,
             /* here, we assume that the buffer is large enough */
             if(length>0) {
                 if(!fn(context, start, U_EXTENDED_CHAR_NAME, buffer, length)) {
-                    return FALSE;
+                    return false;
                 }
             }
             ++start;
         }
     }
 
-    return TRUE;
+    return true;
 }
 
 static UBool
@@ -671,20 +841,20 @@ enumNames(UCharNames *names,
     uint16_t startGroupMSB, endGroupMSB, groupCount;
     const uint16_t *group, *groupLimit;
 
-    startGroupMSB=(uint16_t)(start>>GROUP_SHIFT);
-    endGroupMSB=(uint16_t)((limit-1)>>GROUP_SHIFT);
+    startGroupMSB = static_cast<uint16_t>(start >> GROUP_SHIFT);
+    endGroupMSB = static_cast<uint16_t>((limit - 1) >> GROUP_SHIFT);
 
     /* find the group that contains start, or the highest before it */
     group=getGroup(names, start);
 
     if(startGroupMSB<group[GROUP_MSB] && nameChoice==U_EXTENDED_CHAR_NAME) {
         /* enumerate synthetic names between start and the group start */
-        UChar32 extLimit=((UChar32)group[GROUP_MSB]<<GROUP_SHIFT);
+        UChar32 extLimit = static_cast<UChar32>(group[GROUP_MSB]) << GROUP_SHIFT;
         if(extLimit>limit) {
             extLimit=limit;
         }
         if(!enumExtNames(start, extLimit-1, fn, context)) {
-            return FALSE;
+            return false;
         }
         start=extLimit;
     }
@@ -703,9 +873,9 @@ enumNames(UCharNames *names,
             /* enumerate characters in the partial start group */
             if((start&GROUP_MASK)!=0) {
                 if(!enumGroupNames(names, group,
-                                   start, ((UChar32)startGroupMSB<<GROUP_SHIFT)+LINES_PER_GROUP-1,
+                                   start, (static_cast<UChar32>(startGroupMSB) << GROUP_SHIFT) + LINES_PER_GROUP - 1,
                                    fn, context, nameChoice)) {
-                    return FALSE;
+                    return false;
                 }
                 group=NEXT_GROUP(group); /* continue with the next group */
             }
@@ -718,7 +888,7 @@ enumNames(UCharNames *names,
                     end = limit;
                 }
                 if (!enumExtNames(start, end - 1, fn, context)) {
-                    return FALSE;
+                    return false;
                 }
             }
             group=nextGroup;
@@ -727,9 +897,9 @@ enumNames(UCharNames *names,
         /* enumerate entire groups between the start- and end-groups */
         while(group<groupLimit && group[GROUP_MSB]<endGroupMSB) {
             const uint16_t *nextGroup;
-            start=(UChar32)group[GROUP_MSB]<<GROUP_SHIFT;
+            start = static_cast<UChar32>(group[GROUP_MSB]) << GROUP_SHIFT;
             if(!enumGroupNames(names, group, start, start+LINES_PER_GROUP-1, fn, context, nameChoice)) {
-                return FALSE;
+                return false;
             }
             nextGroup=NEXT_GROUP(group);
             if (nextGroup < groupLimit && nextGroup[GROUP_MSB] > group[GROUP_MSB] + 1 && nameChoice == U_EXTENDED_CHAR_NAME) {
@@ -738,7 +908,7 @@ enumNames(UCharNames *names,
                     end = limit;
                 }
                 if (!enumExtNames((group[GROUP_MSB] + 1) << GROUP_SHIFT, end - 1, fn, context)) {
-                    return FALSE;
+                    return false;
                 }
             }
             group=nextGroup;
@@ -753,7 +923,7 @@ enumNames(UCharNames *names,
                 start = next;
             }
         } else {
-            return TRUE;
+            return true;
         }
     }
 
@@ -766,7 +936,7 @@ enumNames(UCharNames *names,
         return enumExtNames(start, limit - 1, fn, context);
     }
     
-    return TRUE;
+    return true;
 }
 
 static uint16_t
@@ -790,18 +960,18 @@ writeFactorSuffix(const uint16_t *factors, uint16_t count,
     --count;
     for(i=count; i>0; --i) {
         factor=factors[i];
-        indexes[i]=(uint16_t)(code%factor);
+        indexes[i] = static_cast<uint16_t>(code % factor);
         code/=factor;
     }
     /*
      * we don't need to calculate the last modulus because start<=code<=end
      * guarantees here that code<=factors[0]
      */
-    indexes[0]=(uint16_t)code;
+    indexes[0] = static_cast<uint16_t>(code);
 
     /* write each element */
     for(;;) {
-        if(elementBases!=NULL) {
+        if(elementBases!=nullptr) {
             *elementBases++=s;
         }
 
@@ -811,7 +981,7 @@ writeFactorSuffix(const uint16_t *factors, uint16_t count,
             while(*s++!=0) {}
             --factor;
         }
-        if(elements!=NULL) {
+        if(elements!=nullptr) {
             *elements++=s;
         }
 
@@ -826,7 +996,7 @@ writeFactorSuffix(const uint16_t *factors, uint16_t count,
         }
 
         /* skip the rest of the strings for this factors[i] */
-        factor=(uint16_t)(factors[i]-indexes[i]-1);
+        factor = static_cast<uint16_t>(factors[i] - indexes[i] - 1);
         while(factor>0) {
             while(*s++!=0) {}
             --factor;
@@ -865,7 +1035,7 @@ getAlgName(AlgorithmicRange *range, uint32_t code, UCharNameChoice nameChoice,
     switch(range->type) {
     case 0: {
         /* name = prefix hex-digits */
-        const char *s=(const char *)(range+1);
+        const char* s = reinterpret_cast<const char*>(range + 1);
         char c;
 
         uint16_t i, count;
@@ -885,7 +1055,7 @@ getAlgName(AlgorithmicRange *range, uint32_t code, UCharNameChoice nameChoice,
 
         for(i=count; i>0;) {
             if(--i<bufferLength) {
-                c=(char)(code&0xf);
+                c = static_cast<char>(code & 0xf);
                 if(c<10) {
                     c+='0';
                 } else {
@@ -902,9 +1072,9 @@ getAlgName(AlgorithmicRange *range, uint32_t code, UCharNameChoice nameChoice,
     case 1: {
         /* name = prefix factorized-elements */
         uint16_t indexes[8];
-        const uint16_t *factors=(const uint16_t *)(range+1);
+        const uint16_t* factors = reinterpret_cast<const uint16_t*>(range + 1);
         uint16_t count=range->variant;
-        const char *s=(const char *)(factors+count);
+        const char* s = reinterpret_cast<const char*>(factors + count);
         char c;
 
         /* copy prefix */
@@ -913,7 +1083,7 @@ getAlgName(AlgorithmicRange *range, uint32_t code, UCharNameChoice nameChoice,
         }
 
         bufferPos+=writeFactorSuffix(factors, count,
-                                     s, code-range->start, indexes, NULL, NULL, buffer, bufferLength);
+                                     s, code-range->start, indexes, nullptr, nullptr, buffer, bufferLength);
         break;
     }
     default:
@@ -941,7 +1111,7 @@ enumAlgNames(AlgorithmicRange *range,
     uint16_t length;
 
     if(nameChoice!=U_UNICODE_CHAR_NAME && nameChoice!=U_EXTENDED_CHAR_NAME) {
-        return TRUE;
+        return true;
     }
 
     switch(range->type) {
@@ -950,14 +1120,14 @@ enumAlgNames(AlgorithmicRange *range,
         char c;
 
         /* get the full name of the start character */
-        length=getAlgName(range, (uint32_t)start, nameChoice, buffer, sizeof(buffer));
+        length = getAlgName(range, static_cast<uint32_t>(start), nameChoice, buffer, sizeof(buffer));
         if(length<=0) {
-            return TRUE;
+            return true;
         }
 
         /* call the enumerator function with this first character */
         if(!fn(context, start, nameChoice, buffer, length)) {
-            return FALSE;
+            return false;
         }
 
         /* go to the end of the name; all these names have the same length */
@@ -973,7 +1143,7 @@ enumAlgNames(AlgorithmicRange *range,
             for (;;) {
                 c=*--s;
                 if(('0'<=c && c<'9') || ('A'<=c && c<'F')) {
-                    *s=(char)(c+1);
+                    *s = static_cast<char>(c + 1);
                     break;
                 } else if(c=='9') {
                     *s='A';
@@ -984,7 +1154,7 @@ enumAlgNames(AlgorithmicRange *range,
             }
 
             if(!fn(context, start, nameChoice, buffer, length)) {
-                return FALSE;
+                return false;
             }
         }
         break;
@@ -992,9 +1162,9 @@ enumAlgNames(AlgorithmicRange *range,
     case 1: {
         uint16_t indexes[8];
         const char *elementBases[8], *elements[8];
-        const uint16_t *factors=(const uint16_t *)(range+1);
+        const uint16_t* factors = reinterpret_cast<const uint16_t*>(range + 1);
         uint16_t count=range->variant;
-        const char *s=(const char *)(factors+count);
+        const char* s = reinterpret_cast<const char*>(factors + count);
         char *suffix, *t;
         uint16_t prefixLength, i, idx;
 
@@ -1011,14 +1181,14 @@ enumAlgNames(AlgorithmicRange *range,
         }
 
         /* append the suffix of the start character */
-        length=(uint16_t)(prefixLength+writeFactorSuffix(factors, count,
-                                              s, (uint32_t)start-range->start,
+        length = static_cast<uint16_t>(prefixLength + writeFactorSuffix(factors, count,
+                                              s, static_cast<uint32_t>(start) - range->start,
                                               indexes, elementBases, elements,
-                                              suffix, (uint16_t)(sizeof(buffer)-prefixLength)));
+                                              suffix, static_cast<uint16_t>(sizeof(buffer) - prefixLength)));
 
         /* call the enumerator function with this first character */
         if(!fn(context, start, nameChoice, buffer, length)) {
-            return FALSE;
+            return false;
         }
 
         /* enumerate the rest of the names */
@@ -1026,7 +1196,7 @@ enumAlgNames(AlgorithmicRange *range,
             /* increment the indexes in lexical order bound by the factors */
             i=count;
             for (;;) {
-                idx=(uint16_t)(indexes[--i]+1);
+                idx = static_cast<uint16_t>(indexes[--i] + 1);
                 if(idx<factors[i]) {
                     /* skip one index and its element string */
                     indexes[i]=idx;
@@ -1056,7 +1226,7 @@ enumAlgNames(AlgorithmicRange *range,
             *t=0;
 
             if(!fn(context, start, nameChoice, buffer, length)) {
-                return FALSE;
+                return false;
             }
         }
         break;
@@ -1066,7 +1236,7 @@ enumAlgNames(AlgorithmicRange *range,
         break;
     }
 
-    return TRUE;
+    return true;
 }
 
 /*
@@ -1075,8 +1245,9 @@ enumAlgNames(AlgorithmicRange *range,
  * It returns 0xffff otherwise.
  */
 static UChar32
-findAlgName(AlgorithmicRange *range, UCharNameChoice nameChoice, const char *otherName) {
+findAlgName(AlgorithmicRange *range, UCharNameChoice nameChoice, CharacterNameQuery& query) {
     UChar32 code;
+    auto matcher = query.matcher();
 
     if(nameChoice!=U_UNICODE_CHAR_NAME && nameChoice!=U_EXTENDED_CHAR_NAME) {
         return 0xffff;
@@ -1085,23 +1256,16 @@ findAlgName(AlgorithmicRange *range, UCharNameChoice nameChoice, const char *oth
     switch(range->type) {
     case 0: {
         /* name = prefix hex-digits */
-        const char *s=(const char *)(range+1);
-        char c;
-
-        uint16_t i, count;
+        const char* s = reinterpret_cast<const char*>(range + 1);
 
         /* compare prefix */
-        while((c=*s++)!=0) {
-            if((char)c!=*otherName++) {
-                return 0xffff;
-            }
+        if (!matcher.consistentWith(s)) {
+            return 0xffff;
         }
 
         /* read hexadecimal code point value */
-        count=range->variant;
         code=0;
-        for(i=0; i<count; ++i) {
-            c=*otherName++;
+        for(char c : matcher.remainingSignificantCharacters()) {
             if('0'<=c && c<='9') {
                 code=(code<<4)|(c-'0');
             } else if('A'<=c && c<='F') {
@@ -1112,7 +1276,7 @@ findAlgName(AlgorithmicRange *range, UCharNameChoice nameChoice, const char *oth
         }
 
         /* does it fit into the range? */
-        if(*otherName==0 && range->start<=(uint32_t)code && (uint32_t)code<=range->end) {
+        if (range->start <= static_cast<uint32_t>(code) && static_cast<uint32_t>(code) <= range->end) {
             return code;
         }
         break;
@@ -1121,32 +1285,34 @@ findAlgName(AlgorithmicRange *range, UCharNameChoice nameChoice, const char *oth
         char buffer[64];
         uint16_t indexes[8];
         const char *elementBases[8], *elements[8];
-        const uint16_t *factors=(const uint16_t *)(range+1);
+        const uint16_t* factors = reinterpret_cast<const uint16_t*>(range + 1);
         uint16_t count=range->variant;
-        const char *s=(const char *)(factors+count), *t;
+        const char *s = reinterpret_cast<const char*>(factors + count);
         UChar32 start, limit;
         uint16_t i, idx;
-
-        char c;
 
         /* name = prefix factorized-elements */
 
         /* compare prefix */
-        while((c=*s++)!=0) {
-            if((char)c!=*otherName++) {
-                return 0xffff;
-            }
+        std::string_view prefix = s;
+        if (!matcher.consistentWith(prefix)) {
+            return 0xffff;
         }
 
-        start=(UChar32)range->start;
-        limit=(UChar32)(range->end+1);
+        s += prefix.length() + 1;
 
+        start = static_cast<UChar32>(range->start);
+        limit = static_cast<UChar32>(range->end + 1);
+        
+        // This implementation assumes that the suffix does not contain SPACEs nor HYPHEN-MINUSes,
+        // which is the case in practice for the names of Hangul syllables.
+        std::string_view querySuffix = matcher.remainingSignificantCharacters();
         /* initialize the suffix elements for enumeration; indexes should all be set to 0 */
         writeFactorSuffix(factors, count, s, 0,
                           indexes, elementBases, elements, buffer, sizeof(buffer));
 
         /* compare the first suffix */
-        if(0==uprv_strcmp(otherName, buffer)) {
+        if(querySuffix == buffer) {
             return start;
         }
 
@@ -1155,7 +1321,7 @@ findAlgName(AlgorithmicRange *range, UCharNameChoice nameChoice, const char *oth
             /* increment the indexes in lexical order bound by the factors */
             i=count;
             for (;;) {
-                idx=(uint16_t)(indexes[--i]+1);
+                idx = static_cast<uint16_t>(indexes[--i] + 1);
                 if(idx<factors[i]) {
                     /* skip one index and its element string */
                     indexes[i]=idx;
@@ -1171,17 +1337,18 @@ findAlgName(AlgorithmicRange *range, UCharNameChoice nameChoice, const char *oth
             }
 
             /* to make matters a little easier, just compare all elements of the suffix */
-            t=otherName;
+            auto it = querySuffix.begin();
             for(i=0; i<count; ++i) {
                 s=elements[i];
+                char c;
                 while((c=*s++)!=0) {
-                    if(c!=*t++) {
+                    if(it == querySuffix.end() || c!=*it++) {
                         s=""; /* does not match */
                         i=99;
                     }
                 }
             }
-            if(i<99 && *t==0) {
+            if(i<99 && it == querySuffix.end()) {
                 return start;
             }
         }
@@ -1220,27 +1387,27 @@ calcAlgNameSetsLengths(int32_t maxNameLength) {
     int32_t length;
 
     /* enumerate algorithmic ranges */
-    p=(uint32_t *)((uint8_t *)uCharNames+uCharNames->algNamesOffset);
+    p = reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(uCharNames) + uCharNames->algNamesOffset);
     rangeCount=*p;
-    range=(AlgorithmicRange *)(p+1);
+    range = reinterpret_cast<AlgorithmicRange*>(p + 1);
     while(rangeCount>0) {
         switch(range->type) {
         case 0:
             /* name = prefix + (range->variant times) hex-digits */
             /* prefix */
-            length=calcStringSetLength(gNameSet, (const char *)(range+1))+range->variant;
+            length = calcStringSetLength(gNameSet, reinterpret_cast<const char*>(range + 1)) + range->variant;
             if(length>maxNameLength) {
                 maxNameLength=length;
             }
             break;
         case 1: {
             /* name = prefix factorized-elements */
-            const uint16_t *factors=(const uint16_t *)(range+1);
+            const uint16_t* factors = reinterpret_cast<const uint16_t*>(range + 1);
             const char *s;
             int32_t i, count=range->variant, factor, factorLength, maxFactorLength;
 
             /* prefix length */
-            s=(const char *)(factors+count);
+            s = reinterpret_cast<const char*>(factors + count);
             length=calcStringSetLength(gNameSet, s);
             s+=length+1; /* start of factor suffixes */
 
@@ -1267,7 +1434,7 @@ calcAlgNameSetsLengths(int32_t maxNameLength) {
             break;
         }
 
-        range=(AlgorithmicRange *)((uint8_t *)range+range->size);
+        range = reinterpret_cast<AlgorithmicRange*>(reinterpret_cast<uint8_t*>(range) + range->size);
         --rangeCount;
     }
     return maxNameLength;
@@ -1301,33 +1468,33 @@ calcNameSetLength(const uint16_t *tokens, uint16_t tokenCount, const uint8_t *to
     int32_t length=0, tokenLength;
     uint16_t c, token;
 
-    while(line!=lineLimit && (c=*line++)!=(uint8_t)';') {
+    while (line != lineLimit && (c = *line++) != static_cast<uint8_t>(';')) {
         if(c>=tokenCount) {
             /* implicit letter */
             SET_ADD(set, c);
             ++length;
         } else {
             token=tokens[c];
-            if(token==(uint16_t)(-2)) {
+            if (token == static_cast<uint16_t>(-2)) {
                 /* this is a lead byte for a double-byte token */
                 c=c<<8|*line++;
                 token=tokens[c];
             }
-            if(token==(uint16_t)(-1)) {
+            if (token == static_cast<uint16_t>(-1)) {
                 /* explicit letter */
                 SET_ADD(set, c);
                 ++length;
             } else {
                 /* count token word */
-                if(tokenLengths!=NULL) {
+                if(tokenLengths!=nullptr) {
                     /* use cached token length */
                     tokenLength=tokenLengths[c];
                     if(tokenLength==0) {
-                        tokenLength=calcStringSetLength(set, (const char *)tokenStrings+token);
-                        tokenLengths[c]=(int8_t)tokenLength;
+                        tokenLength = calcStringSetLength(set, reinterpret_cast<const char*>(tokenStrings) + token);
+                        tokenLengths[c] = static_cast<int8_t>(tokenLength);
                     }
                 } else {
-                    tokenLength=calcStringSetLength(set, (const char *)tokenStrings+token);
+                    tokenLength = calcStringSetLength(set, reinterpret_cast<const char*>(tokenStrings) + token);
                 }
                 length+=tokenLength;
             }
@@ -1342,9 +1509,9 @@ static void
 calcGroupNameSetsLengths(int32_t maxNameLength) {
     uint16_t offsets[LINES_PER_GROUP+2], lengths[LINES_PER_GROUP+2];
 
-    uint16_t *tokens=(uint16_t *)uCharNames+8;
+    uint16_t* tokens = reinterpret_cast<uint16_t*>(uCharNames) + 8;
     uint16_t tokenCount=*tokens++;
-    uint8_t *tokenStrings=(uint8_t *)uCharNames+uCharNames->tokenStringOffset;
+    uint8_t* tokenStrings = reinterpret_cast<uint8_t*>(uCharNames) + uCharNames->tokenStringOffset;
 
     int8_t *tokenLengths;
 
@@ -1353,8 +1520,8 @@ calcGroupNameSetsLengths(int32_t maxNameLength) {
 
     int32_t groupCount, lineNumber, length;
 
-    tokenLengths=(int8_t *)uprv_malloc(tokenCount);
-    if(tokenLengths!=NULL) {
+    tokenLengths = static_cast<int8_t*>(uprv_malloc(tokenCount));
+    if(tokenLengths!=nullptr) {
         uprv_memset(tokenLengths, 0, tokenCount);
     }
 
@@ -1363,7 +1530,7 @@ calcGroupNameSetsLengths(int32_t maxNameLength) {
 
     /* enumerate all groups */
     while(groupCount>0) {
-        s=(uint8_t *)uCharNames+uCharNames->groupStringOffset+GET_GROUP_OFFSET(group);
+        s = reinterpret_cast<uint8_t*>(uCharNames) + uCharNames->groupStringOffset + GET_GROUP_OFFSET(group);
         s=expandGroupLengths(s, offsets, lengths);
 
         /* enumerate all lines in each group */
@@ -1402,7 +1569,7 @@ calcGroupNameSetsLengths(int32_t maxNameLength) {
         --groupCount;
     }
 
-    if(tokenLengths!=NULL) {
+    if(tokenLengths!=nullptr) {
         uprv_free(tokenLengths);
     }
 
@@ -1416,15 +1583,15 @@ calcNameSetsLengths(UErrorCode *pErrorCode) {
     int32_t i, maxNameLength;
 
     if(gMaxNameLength!=0) {
-        return TRUE;
+        return true;
     }
 
     if(!isDataLoaded(pErrorCode)) {
-        return FALSE;
+        return false;
     }
 
     /* set hex digits, used in various names, and <>-, used in extended names */
-    for(i=0; i<(int32_t)sizeof(extChars)-1; ++i) {
+    for (i = 0; i < static_cast<int32_t>(sizeof(extChars)) - 1; ++i) {
         SET_ADD(gNameSet, extChars[i]);
     }
 
@@ -1437,7 +1604,7 @@ calcNameSetsLengths(UErrorCode *pErrorCode) {
     /* set sets and lengths from group names, set global maximum values */
     calcGroupNameSetsLengths(maxNameLength);
 
-    return TRUE;
+    return true;
 }
 
 U_NAMESPACE_END
@@ -1456,10 +1623,10 @@ u_charName(UChar32 code, UCharNameChoice nameChoice,
     int32_t length;
 
     /* check the argument values */
-    if(pErrorCode==NULL || U_FAILURE(*pErrorCode)) {
+    if(pErrorCode==nullptr || U_FAILURE(*pErrorCode)) {
         return 0;
     } else if(nameChoice>=U_CHAR_NAME_CHOICE_COUNT ||
-              bufferLength<0 || (bufferLength>0 && buffer==NULL)
+              bufferLength<0 || (bufferLength>0 && buffer==nullptr)
     ) {
         *pErrorCode=U_ILLEGAL_ARGUMENT_ERROR;
         return 0;
@@ -1505,9 +1672,9 @@ u_getISOComment(UChar32 /*c*/,
                 char *dest, int32_t destCapacity,
                 UErrorCode *pErrorCode) {
     /* check the argument values */
-    if(pErrorCode==NULL || U_FAILURE(*pErrorCode)) {
+    if(pErrorCode==nullptr || U_FAILURE(*pErrorCode)) {
         return 0;
-    } else if(destCapacity<0 || (destCapacity>0 && dest==NULL)) {
+    } else if(destCapacity<0 || (destCapacity>0 && dest==nullptr)) {
         *pErrorCode=U_ILLEGAL_ARGUMENT_ERROR;
         return 0;
     }
@@ -1517,9 +1684,8 @@ u_getISOComment(UChar32 /*c*/,
 
 U_CAPI UChar32 U_EXPORT2
 u_charFromName(UCharNameChoice nameChoice,
-               const char *name,
+               const char *const name,
                UErrorCode *pErrorCode) {
-    char upper[120] = {0};
     char lower[120] = {0};
     FindName findName;
     AlgorithmicRange *algRange;
@@ -1529,11 +1695,11 @@ u_charFromName(UCharNameChoice nameChoice,
     char c0;
     static constexpr UChar32 error = 0xffff;     /* Undefined, but use this for backwards compatibility. */
 
-    if(pErrorCode==NULL || U_FAILURE(*pErrorCode)) {
+    if(pErrorCode==nullptr || U_FAILURE(*pErrorCode)) {
         return error;
     }
 
-    if(nameChoice>=U_CHAR_NAME_CHOICE_COUNT || name==NULL || *name==0) {
+    if(nameChoice>=U_CHAR_NAME_CHOICE_COUNT || name==nullptr || *name==0) {
         *pErrorCode=U_ILLEGAL_ARGUMENT_ERROR;
         return error;
     }
@@ -1542,24 +1708,26 @@ u_charFromName(UCharNameChoice nameChoice,
         return error;
     }
 
-    /* construct the uppercase and lowercase of the name first */
-    for(i=0; i<sizeof(upper); ++i) {
-        if((c0=*name++)!=0) {
-            upper[i]=uprv_toupper(c0);
+    /* construct the lowercase of the name first */
+    const char* nameChar = name;
+    for(i=0; i<sizeof(lower); ++i) {
+        if((c0=*nameChar++)!=0) {
             lower[i]=uprv_tolower(c0);
         } else {
-            upper[i]=lower[i]=0;
             break;
         }
     }
-    if(i==sizeof(upper)) {
+    if(i==sizeof(lower)) {
         /* name too long, there is no such character */
         *pErrorCode = U_ILLEGAL_CHAR_FOUND;
         return error;
     }
-    // i==strlen(name)==strlen(lower)==strlen(upper)
+    // i==strlen(name)==strlen(lower)
 
     /* try extended names first */
+    // The ICU extended names are not consistent with the UAX44 code point labels, e.g.,
+    // "unassigned" vs. UAX44 "reserved", "private use area" vs. UAX44 "private-use", so we do not
+    // apply UAX44-LM2 matching to them.
     if (lower[0] == '<') {
         if (nameChoice == U_EXTENDED_CHAR_NAME && lower[--i] == '>') {
             // Parse a string like "<category-HHHH>" where HHHH is a hex code point.
@@ -1609,12 +1777,15 @@ u_charFromName(UCharNameChoice nameChoice,
         return error;
     }
 
+    // From now on we do UAX44 matching.
+    CharacterNameQuery query(name);
+
     /* try algorithmic names now */
     p=(uint32_t *)((uint8_t *)uCharNames+uCharNames->algNamesOffset);
     i=*p;
     algRange=(AlgorithmicRange *)(p+1);
     while(i>0) {
-        if((cp=findAlgName(algRange, nameChoice, upper))!=0xffff) {
+        if((cp=findAlgName(algRange, nameChoice, query))!=0xffff) {
             return cp;
         }
         algRange=(AlgorithmicRange *)((uint8_t *)algRange+algRange->size);
@@ -1622,7 +1793,7 @@ u_charFromName(UCharNameChoice nameChoice,
     }
 
     /* normal character name */
-    findName.otherName=upper;
+    findName.otherName=&query;
     findName.code=error;
     enumNames(uCharNames, 0, UCHAR_MAX_VALUE + 1, DO_FIND_NAME, &findName, nameChoice);
     if (findName.code == error) {
@@ -1641,11 +1812,11 @@ u_enumCharNames(UChar32 start, UChar32 limit,
     uint32_t *p;
     uint32_t i;
 
-    if(pErrorCode==NULL || U_FAILURE(*pErrorCode)) {
+    if(pErrorCode==nullptr || U_FAILURE(*pErrorCode)) {
         return;
     }
 
-    if(nameChoice>=U_CHAR_NAME_CHOICE_COUNT || fn==NULL) {
+    if(nameChoice>=U_CHAR_NAME_CHOICE_COUNT || fn==nullptr) {
         *pErrorCode=U_ILLEGAL_ARGUMENT_ERROR;
         return;
     }
@@ -1716,7 +1887,7 @@ uprv_getMaxCharNameLength() {
  */
 static void
 charSetToUSet(uint32_t cset[8], const USetAdder *sa) {
-    UChar us[256];
+    char16_t us[256];
     char cs[256];
 
     int32_t i, length;
@@ -1732,16 +1903,16 @@ charSetToUSet(uint32_t cset[8], const USetAdder *sa) {
     length=0;
     for(i=0; i<256; ++i) {
         if(SET_CONTAINS(cset, i)) {
-            cs[length++]=(char)i;
+            cs[length++] = static_cast<char>(i);
         }
     }
 
-    /* convert the char string to a UChar string */
+    /* convert the char string to a char16_t string */
     u_charsToUChars(cs, us, length);
 
-    /* add each UChar to the USet */
+    /* add each char16_t to the USet */
     for(i=0; i<length; ++i) {
-        if(us[i]!=0 || cs[i]==0) { /* non-invariant chars become (UChar)0 */
+        if(us[i]!=0 || cs[i]==0) { /* non-invariant chars become (char16_t)0 */
             sa->add(sa->set, us[i]);
         }
     }
@@ -1785,7 +1956,7 @@ makeTokenMap(const UDataSwapper *ds,
     if(ds->inCharset==ds->outCharset) {
         /* Same charset family: identity permutation */
         for(i=0; i<256; ++i) {
-            map[i]=(uint8_t)i;
+            map[i] = static_cast<uint8_t>(i);
         }
     } else {
         uprv_memset(map, 0, 256);
@@ -1799,7 +1970,7 @@ makeTokenMap(const UDataSwapper *ds,
         for(i=1; i<tokenCount; ++i) {
             if(tokens[i]==-1) {
                 /* convert the direct byte character */
-                c1=(uint8_t)i;
+                c1 = static_cast<uint8_t>(i);
                 ds->swapInvChars(ds, &c1, 1, &c2, pErrorCode);
                 if(U_FAILURE(*pErrorCode)) {
                     udata_printError(ds, "unames/makeTokenMap() finds variant character 0x%02x used (input charset family %d)\n",
@@ -1809,7 +1980,7 @@ makeTokenMap(const UDataSwapper *ds,
 
                 /* enter the converted character into the map and mark it used */
                 map[c1]=c2;
-                usedOutChar[c2]=TRUE;
+                usedOutChar[c2]=true;
             }
         }
 
@@ -1821,7 +1992,7 @@ makeTokenMap(const UDataSwapper *ds,
                 while(usedOutChar[j]) {
                     ++j;
                 }
-                map[i]=(uint8_t)j++;
+                map[i] = static_cast<uint8_t>(j++);
             }
         }
 
@@ -1850,7 +2021,7 @@ uchar_swapNames(const UDataSwapper *ds,
 
     /* udata_swapDataHeader checks the arguments */
     headerSize=udata_swapDataHeader(ds, inData, length, outData, pErrorCode);
-    if(pErrorCode==NULL || U_FAILURE(*pErrorCode)) {
+    if(pErrorCode==nullptr || U_FAILURE(*pErrorCode)) {
         return 0;
     }
 
@@ -1872,7 +2043,7 @@ uchar_swapNames(const UDataSwapper *ds,
     }
 
     inBytes=(const uint8_t *)inData+headerSize;
-    outBytes=(uint8_t *)outData+headerSize;
+    outBytes=(outData == nullptr) ? nullptr : (uint8_t *)outData+headerSize;
     if(length<0) {
         algNamesOffset=ds->readUInt32(((const uint32_t *)inBytes)[3]);
     } else {
@@ -1954,7 +2125,7 @@ uchar_swapNames(const UDataSwapper *ds,
          * go through a temporary array to support in-place swapping
          */
         temp=(uint16_t *)uprv_malloc(tokenCount*2);
-        if(temp==NULL) {
+        if(temp==nullptr) {
             udata_printError(ds, "out of memory swapping %u unames.icu tokens\n",
                              tokenCount);
             *pErrorCode=U_MEMORY_ALLOCATION_ERROR;

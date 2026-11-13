@@ -120,7 +120,6 @@ public:
      * @param limit offset immediately following the last character to
      * be copied
      * @param target UnicodeString into which to copy characters.
-     * @return A reference to <TT>target</TT>
      * @stable ICU 2.1
      */
     virtual void extractBetween(int32_t start,
@@ -192,7 +191,7 @@ public:
      * Clone this object, an instance of a subclass of Replaceable.
      * Clones can be used concurrently in multiple threads.
      * If a subclass does not implement clone(), or if an error occurs,
-     * then NULL is returned.
+     * then nullptr is returned.
      * The caller must delete the clone.
      *
      * @return a clone of this object

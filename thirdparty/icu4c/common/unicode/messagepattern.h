@@ -388,7 +388,7 @@ public:
      * @param pattern a MessageFormat pattern string
      * @param parseError Struct to receive information on the position
      *                   of an error within the pattern.
-     *                   Can be NULL.
+     *                   Can be nullptr.
      * @param errorCode Standard ICU error code. Its input value must
      *                  pass the U_SUCCESS() test, or else the function returns
      *                  immediately. Check for U_FAILURE() on output or use with
@@ -415,7 +415,7 @@ public:
      * @return *this=other
      * @stable ICU 4.8
      */
-    MessagePattern &operator=(const MessagePattern &other);
+    MessagePattern& operator=(const MessagePattern& other) U_LIFETIME_BOUND;
 
     /**
      * Destructor.
@@ -428,7 +428,7 @@ public:
      * @param pattern a MessageFormat pattern string
      * @param parseError Struct to receive information on the position
      *                   of an error within the pattern.
-     *                   Can be NULL.
+     *                   Can be nullptr.
      * @param errorCode Standard ICU error code. Its input value must
      *                  pass the U_SUCCESS() test, or else the function returns
      *                  immediately. Check for U_FAILURE() on output or use with
@@ -440,15 +440,16 @@ public:
      * @throws NumberFormatException if a number could not be parsed
      * @stable ICU 4.8
      */
-    MessagePattern &parse(const UnicodeString &pattern,
-                          UParseError *parseError, UErrorCode &errorCode);
+    MessagePattern& parse(const UnicodeString& pattern,
+                          UParseError* parseError,
+                          UErrorCode& errorCode) U_LIFETIME_BOUND;
 
     /**
      * Parses a ChoiceFormat pattern string.
      * @param pattern a ChoiceFormat pattern string
      * @param parseError Struct to receive information on the position
      *                   of an error within the pattern.
-     *                   Can be NULL.
+     *                   Can be nullptr.
      * @param errorCode Standard ICU error code. Its input value must
      *                  pass the U_SUCCESS() test, or else the function returns
      *                  immediately. Check for U_FAILURE() on output or use with
@@ -460,15 +461,16 @@ public:
      * @throws NumberFormatException if a number could not be parsed
      * @stable ICU 4.8
      */
-    MessagePattern &parseChoiceStyle(const UnicodeString &pattern,
-                                     UParseError *parseError, UErrorCode &errorCode);
+    MessagePattern& parseChoiceStyle(const UnicodeString& pattern,
+                                     UParseError* parseError,
+                                     UErrorCode& errorCode) U_LIFETIME_BOUND;
 
     /**
      * Parses a PluralFormat pattern string.
      * @param pattern a PluralFormat pattern string
      * @param parseError Struct to receive information on the position
      *                   of an error within the pattern.
-     *                   Can be NULL.
+     *                   Can be nullptr.
      * @param errorCode Standard ICU error code. Its input value must
      *                  pass the U_SUCCESS() test, or else the function returns
      *                  immediately. Check for U_FAILURE() on output or use with
@@ -480,15 +482,16 @@ public:
      * @throws NumberFormatException if a number could not be parsed
      * @stable ICU 4.8
      */
-    MessagePattern &parsePluralStyle(const UnicodeString &pattern,
-                                     UParseError *parseError, UErrorCode &errorCode);
+    MessagePattern& parsePluralStyle(const UnicodeString& pattern,
+                                     UParseError* parseError,
+                                     UErrorCode& errorCode) U_LIFETIME_BOUND;
 
     /**
      * Parses a SelectFormat pattern string.
      * @param pattern a SelectFormat pattern string
      * @param parseError Struct to receive information on the position
      *                   of an error within the pattern.
-     *                   Can be NULL.
+     *                   Can be nullptr.
      * @param errorCode Standard ICU error code. Its input value must
      *                  pass the U_SUCCESS() test, or else the function returns
      *                  immediately. Check for U_FAILURE() on output or use with
@@ -500,8 +503,9 @@ public:
      * @throws NumberFormatException if a number could not be parsed
      * @stable ICU 4.8
      */
-    MessagePattern &parseSelectStyle(const UnicodeString &pattern,
-                                     UParseError *parseError, UErrorCode &errorCode);
+    MessagePattern& parseSelectStyle(const UnicodeString& pattern,
+                                     UParseError* parseError,
+                                     UErrorCode& errorCode) U_LIFETIME_BOUND;
 
     /**
      * Clears this MessagePattern.
@@ -558,7 +562,7 @@ public:
      * @return the parsed pattern string (null if none was parsed).
      * @stable ICU 4.8
      */
-    const UnicodeString &getPatternString() const {
+    const UnicodeString& getPatternString() const U_LIFETIME_BOUND {
         return msg;
     }
 
@@ -623,7 +627,7 @@ public:
      * @return the i-th pattern "part".
      * @stable ICU 4.8
      */
-    const Part &getPart(int32_t i) const {
+    const Part& getPart(int32_t i) const U_LIFETIME_BOUND {
         return parts[i];
     }
 
@@ -656,7 +660,7 @@ public:
      * @return the substring associated with part.
      * @stable ICU 4.8
      */
-    UnicodeString getSubstring(const Part &part) const {
+    UnicodeString getSubstring(const Part& part) const U_LIFETIME_BOUND {
         return msg.tempSubString(part.index, part.length);
     }
 
@@ -775,7 +779,7 @@ public:
         UMessagePatternArgType getArgType() const {
             UMessagePatternPartType msgType=getType();
             if(msgType ==UMSGPAT_PART_TYPE_ARG_START || msgType ==UMSGPAT_PART_TYPE_ARG_LIMIT) {
-                return (UMessagePatternArgType)value;
+                return static_cast<UMessagePatternArgType>(value);
             } else {
                 return UMSGPAT_ARG_TYPE_NONE;
             }
@@ -821,6 +825,7 @@ public:
 
         static const int32_t MAX_LENGTH=0xffff;
         static const int32_t MAX_VALUE=0x7fff;
+        static const int32_t MAX_NESTED_LEVELS=0x03ff;
 
         // Some fields are not final because they are modified during pattern parsing.
         // After pattern parsing, the parts are effectively immutable.

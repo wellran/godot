@@ -3,7 +3,7 @@
   
    Forked from the public domain/unlicense version at: https://code.google.com/archive/p/miniz/ 
    
-   Copyright (C) 2019-2021 Binomial LLC. All Rights Reserved.
+   Copyright (C) 2019-2024 Binomial LLC. All Rights Reserved.
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -74,6 +74,14 @@
 #if MINIZ_X86_OR_X64_CPU
 // Set MINIZ_USE_UNALIGNED_LOADS_AND_STORES to 1 on CPU's that permit efficient integer loads and stores from unaligned addresses.
 #define MINIZ_USE_UNALIGNED_LOADS_AND_STORES 1
+#endif
+
+// Using unaligned loads and stores causes errors when using UBSan. Jam it off.
+#if defined(__has_feature)
+#if __has_feature(undefined_behavior_sanitizer)
+#undef MINIZ_USE_UNALIGNED_LOADS_AND_STORES
+#define MINIZ_USE_UNALIGNED_LOADS_AND_STORES 0
+#endif
 #endif
 
 #if defined(_M_X64) || defined(_WIN64) || defined(__MINGW64__) || defined(_LP64) || defined(__LP64__) || defined(__ia64__) || defined(__x86_64__)
@@ -236,6 +244,7 @@ int mz_inflateInit2(mz_streamp pStream, int window_bits);
 //   MZ_BUF_ERROR if no forward progress is possible because the input buffer is empty but the inflater needs more input to continue, or if the output buffer is not large enough. Call mz_inflate() again
 //   with more input data, or with more room in the output buffer (except when using single call decompression, described above).
 int mz_inflate(mz_streamp pStream, int flush);
+int mz_inflate2(mz_streamp pStream, int flush, int adler32_checking);
 
 // Deinitializes a decompressor.
 int mz_inflateEnd(mz_streamp pStream);
@@ -880,10 +889,10 @@ int mz_inflateInit(mz_streamp pStream)
    return mz_inflateInit2(pStream, MZ_DEFAULT_WINDOW_BITS);
 }
 
-int mz_inflate(mz_streamp pStream, int flush)
+int mz_inflate2(mz_streamp pStream, int flush, int adler32_checking)
 {
   inflate_state* pState;
-  mz_uint n, first_call, decomp_flags = TINFL_FLAG_COMPUTE_ADLER32;
+  mz_uint n, first_call, decomp_flags = adler32_checking ? TINFL_FLAG_COMPUTE_ADLER32 : 0;
   size_t in_bytes, out_bytes, orig_avail_in;
   tinfl_status status;
 
@@ -969,6 +978,11 @@ int mz_inflate(mz_streamp pStream, int flush)
   }
 
   return ((status == TINFL_STATUS_DONE) && (!pState->m_dict_avail)) ? MZ_STREAM_END : MZ_OK;
+}
+
+int mz_inflate(mz_streamp pStream, int flush)
+{
+    return mz_inflate2(pStream, flush, MZ_TRUE);
 }
 
 int mz_inflateEnd(mz_streamp pStream)
@@ -1348,7 +1362,8 @@ tinfl_status tinfl_decompress(tinfl_decompressor *r, const mz_uint8 *pIn_buf_nex
 common_exit:
   r->m_num_bits = num_bits; r->m_bit_buf = bit_buf; r->m_dist = dist; r->m_counter = counter; r->m_num_extra = num_extra; r->m_dist_from_out_buf_start = dist_from_out_buf_start;
   *pIn_buf_size = pIn_buf_cur - pIn_buf_next; *pOut_buf_size = pOut_buf_cur - pOut_buf_next;
-  if ((decomp_flags & (TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_COMPUTE_ADLER32)) && (status >= 0))
+  //if ((decomp_flags & (TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_COMPUTE_ADLER32)) && (status >= 0))
+  if ((decomp_flags & TINFL_FLAG_COMPUTE_ADLER32) && (status >= 0))
   {
     const mz_uint8 *ptr = pOut_buf_next; size_t buf_len = *pOut_buf_size;
     mz_uint32 i, s1 = r->m_check_adler32 & 0xffff, s2 = r->m_check_adler32 >> 16; size_t block_len = buf_len % 5552;
@@ -1362,7 +1377,9 @@ common_exit:
       for ( ; i < block_len; ++i) s1 += *ptr++, s2 += s1;
       s1 %= 65521U, s2 %= 65521U; buf_len -= block_len; block_len = 5552;
     }
-    r->m_check_adler32 = (s2 << 16) + s1; if ((status == TINFL_STATUS_DONE) && (decomp_flags & TINFL_FLAG_PARSE_ZLIB_HEADER) && (r->m_check_adler32 != r->m_z_adler32)) status = TINFL_STATUS_ADLER32_MISMATCH;
+    r->m_check_adler32 = (s2 << 16) + s1; 
+    if ((status == TINFL_STATUS_DONE) && (decomp_flags & TINFL_FLAG_PARSE_ZLIB_HEADER) && (r->m_check_adler32 != r->m_z_adler32)) 
+        status = TINFL_STATUS_ADLER32_MISMATCH;
   }
   return status;
 }
@@ -1956,7 +1973,7 @@ static MZ_FORCEINLINE void tdefl_find_match(tdefl_compressor *d, mz_uint lookahe
                    (TDEFL_READ_UNALIGNED_WORD(++p) == TDEFL_READ_UNALIGNED_WORD(++q)) && (TDEFL_READ_UNALIGNED_WORD(++p) == TDEFL_READ_UNALIGNED_WORD(++q)) && (--probe_len > 0) );
     if (!probe_len)
     {
-      *pMatch_dist = dist; *pMatch_len = MZ_MIN(max_match_len, TDEFL_MAX_MATCH_LEN); break;
+      *pMatch_dist = dist; *pMatch_len = MZ_MIN(max_match_len, (mz_uint)TDEFL_MAX_MATCH_LEN); break;
     }
     else if ((probe_len = ((mz_uint)(p - s) * 2) + (mz_uint)(*(const mz_uint8*)p == *(const mz_uint8*)q)) > match_len)
     {
@@ -2084,7 +2101,7 @@ static mz_bool tdefl_compress_fast(tdefl_compressor *d)
 
       total_lz_bytes += cur_match_len;
       lookahead_pos += cur_match_len;
-      dict_size = MZ_MIN(dict_size + cur_match_len, TDEFL_LZ_DICT_SIZE);
+      dict_size = MZ_MIN(dict_size + cur_match_len, (mz_uint)TDEFL_LZ_DICT_SIZE);
       cur_pos = (cur_pos + cur_match_len) & TDEFL_LZ_DICT_SIZE_MASK;
       MZ_ASSERT(lookahead_size >= cur_match_len);
       lookahead_size -= cur_match_len;
@@ -2112,7 +2129,7 @@ static mz_bool tdefl_compress_fast(tdefl_compressor *d)
       d->m_huff_count[0][lit]++;
 
       lookahead_pos++;
-      dict_size = MZ_MIN(dict_size + 1, TDEFL_LZ_DICT_SIZE);
+      dict_size = MZ_MIN(dict_size + 1, (mz_uint)TDEFL_LZ_DICT_SIZE);
       cur_pos = (cur_pos + 1) & TDEFL_LZ_DICT_SIZE_MASK;
       lookahead_size--;
 
@@ -2266,7 +2283,7 @@ static mz_bool tdefl_compress_normal(tdefl_compressor *d)
     d->m_lookahead_pos += len_to_move;
     MZ_ASSERT(d->m_lookahead_size >= len_to_move);
     d->m_lookahead_size -= len_to_move;
-    d->m_dict_size = MZ_MIN(d->m_dict_size + len_to_move, TDEFL_LZ_DICT_SIZE);
+    d->m_dict_size = MZ_MIN(d->m_dict_size + len_to_move, (mz_uint)TDEFL_LZ_DICT_SIZE);
     // Check if it's time to flush the current LZ codes to the internal output buffer.
     if ( (d->m_pLZ_code_buf > &d->m_lz_code_buf[TDEFL_LZ_CODE_BUF_SIZE - 8]) ||
          ( (d->m_total_lz_bytes > 31*1024) && (((((mz_uint)(d->m_pLZ_code_buf - d->m_lz_code_buf) * 115) >> 7) >= d->m_total_lz_bytes) || (d->m_flags & TDEFL_FORCE_ALL_RAW_BLOCKS))) )
@@ -2479,7 +2496,7 @@ void *tdefl_write_image_to_png_file_in_memory_ex(const void *pImage, int w, int 
   // write dummy header
   for (z = 41; z; --z) tdefl_output_buffer_putter(&z, 1, &out_buf);
   // compress image data
-  tdefl_init(pComp, tdefl_output_buffer_putter, &out_buf, s_tdefl_png_num_probes[MZ_MIN(10, level)] | TDEFL_WRITE_ZLIB_HEADER);
+  tdefl_init(pComp, tdefl_output_buffer_putter, &out_buf, s_tdefl_png_num_probes[MZ_MIN(10, level)] | TDEFL_WRITE_ZLIB_HEADER | (level <= 3 ? TDEFL_GREEDY_PARSING_FLAG : 0));
   for (y = 0; y < h; ++y) { tdefl_compress_buffer(pComp, &z, 1, TDEFL_NO_FLUSH); tdefl_compress_buffer(pComp, (mz_uint8*)pImage + (flip ? (h - 1 - y) : y) * bpl, bpl, TDEFL_NO_FLUSH); }
   if (tdefl_compress_buffer(pComp, NULL, 0, TDEFL_FINISH) != TDEFL_STATUS_DONE) { MZ_FREE(pComp); MZ_FREE(out_buf.m_pBuf); return NULL; }
   // write real header

@@ -1,59 +1,70 @@
-/*************************************************************************/
-/*  rendering_device_binds.h                                             */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  rendering_device_binds.h                                              */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
-#ifndef RENDERING_DEVICE_BINDS_H
-#define RENDERING_DEVICE_BINDS_H
+#pragma once
 
+#include "core/io/resource.h"
+#include "core/object/class_db.h"
 #include "servers/rendering/rendering_device.h"
 
-#define RD_SETGET(m_type, m_member)                                            \
-	void set_##m_member(m_type p_##m_member) { base.m_member = p_##m_member; } \
-	m_type get_##m_member() const { return base.m_member; }
+#define RD_SETGET(m_type, m_member) \
+	void set_##m_member(m_type p_##m_member) { \
+		base.m_member = p_##m_member; \
+	} \
+	m_type get_##m_member() const { \
+		return base.m_member; \
+	}
 
-#define RD_BIND(m_variant_type, m_class, m_member)                                                          \
+#define RD_BIND(m_variant_type, m_class, m_member) \
 	ClassDB::bind_method(D_METHOD("set_" _MKSTR(m_member), "p_" _MKSTR(member)), &m_class::set_##m_member); \
-	ClassDB::bind_method(D_METHOD("get_" _MKSTR(m_member)), &m_class::get_##m_member);                      \
+	ClassDB::bind_method(D_METHOD("get_" _MKSTR(m_member)), &m_class::get_##m_member); \
 	ADD_PROPERTY(PropertyInfo(m_variant_type, #m_member), "set_" _MKSTR(m_member), "get_" _MKSTR(m_member))
 
-#define RD_SETGET_SUB(m_type, m_sub, m_member)                                                 \
-	void set_##m_sub##_##m_member(m_type p_##m_member) { base.m_sub.m_member = p_##m_member; } \
-	m_type get_##m_sub##_##m_member() const { return base.m_sub.m_member; }
+#define RD_SETGET_SUB(m_type, m_sub, m_member) \
+	void set_##m_sub##_##m_member(m_type p_##m_member) { \
+		base.m_sub.m_member = p_##m_member; \
+	} \
+	m_type get_##m_sub##_##m_member() const { \
+		return base.m_sub.m_member; \
+	}
 
-#define RD_BIND_SUB(m_variant_type, m_class, m_sub, m_member)                                                                           \
+#define RD_BIND_SUB(m_variant_type, m_class, m_sub, m_member) \
 	ClassDB::bind_method(D_METHOD("set_" _MKSTR(m_sub) "_" _MKSTR(m_member), "p_" _MKSTR(member)), &m_class::set_##m_sub##_##m_member); \
-	ClassDB::bind_method(D_METHOD("get_" _MKSTR(m_sub) "_" _MKSTR(m_member)), &m_class::get_##m_sub##_##m_member);                      \
+	ClassDB::bind_method(D_METHOD("get_" _MKSTR(m_sub) "_" _MKSTR(m_member)), &m_class::get_##m_sub##_##m_member); \
 	ADD_PROPERTY(PropertyInfo(m_variant_type, _MKSTR(m_sub) "_" _MKSTR(m_member)), "set_" _MKSTR(m_sub) "_" _MKSTR(m_member), "get_" _MKSTR(m_sub) "_" _MKSTR(m_member))
 
 class RDTextureFormat : public RefCounted {
 	GDCLASS(RDTextureFormat, RefCounted)
+
 	friend class RenderingDevice;
+	friend class RenderSceneBuffersRD;
 
 	RD::TextureFormat base;
 
@@ -66,7 +77,9 @@ public:
 	RD_SETGET(uint32_t, mipmaps)
 	RD_SETGET(RD::TextureType, texture_type)
 	RD_SETGET(RD::TextureSamples, samples)
-	RD_SETGET(uint32_t, usage_bits)
+	RD_SETGET(BitField<RenderingDevice::TextureUsageBits>, usage_bits)
+	RD_SETGET(bool, is_resolve_buffer)
+	RD_SETGET(bool, is_discardable)
 
 	void add_shareable_format(RD::DataFormat p_format) { base.shareable_formats.push_back(p_format); }
 	void remove_shareable_format(RD::DataFormat p_format) { base.shareable_formats.erase(p_format); }
@@ -82,6 +95,9 @@ protected:
 		RD_BIND(Variant::INT, RDTextureFormat, texture_type);
 		RD_BIND(Variant::INT, RDTextureFormat, samples);
 		RD_BIND(Variant::INT, RDTextureFormat, usage_bits);
+		RD_BIND(Variant::BOOL, RDTextureFormat, is_resolve_buffer);
+		RD_BIND(Variant::BOOL, RDTextureFormat, is_discardable);
+
 		ClassDB::bind_method(D_METHOD("add_shareable_format", "format"), &RDTextureFormat::add_shareable_format);
 		ClassDB::bind_method(D_METHOD("remove_shareable_format", "format"), &RDTextureFormat::remove_shareable_format);
 	}
@@ -91,6 +107,7 @@ class RDTextureView : public RefCounted {
 	GDCLASS(RDTextureView, RefCounted)
 
 	friend class RenderingDevice;
+	friend class RenderSceneBuffersRD;
 
 	RD::TextureView base;
 
@@ -131,6 +148,7 @@ protected:
 class RDFramebufferPass : public RefCounted {
 	GDCLASS(RDFramebufferPass, RefCounted)
 	friend class RenderingDevice;
+	friend class FramebufferCacheRD;
 
 	RD::FramebufferPass base;
 
@@ -205,6 +223,7 @@ class RDVertexAttribute : public RefCounted {
 	RD::VertexAttribute base;
 
 public:
+	RD_SETGET(uint32_t, binding)
 	RD_SETGET(uint32_t, location)
 	RD_SETGET(uint32_t, offset)
 	RD_SETGET(RD::DataFormat, format)
@@ -213,6 +232,7 @@ public:
 
 protected:
 	static void _bind_methods() {
+		RD_BIND(Variant::INT, RDVertexAttribute, binding);
 		RD_BIND(Variant::INT, RDVertexAttribute, location);
 		RD_BIND(Variant::INT, RDVertexAttribute, offset);
 		RD_BIND(Variant::INT, RDVertexAttribute, format);
@@ -258,6 +278,11 @@ protected:
 		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "source_tesselation_control"), "set_stage_source", "get_stage_source", RD::SHADER_STAGE_TESSELATION_CONTROL);
 		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "source_tesselation_evaluation"), "set_stage_source", "get_stage_source", RD::SHADER_STAGE_TESSELATION_EVALUATION);
 		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "source_compute"), "set_stage_source", "get_stage_source", RD::SHADER_STAGE_COMPUTE);
+		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "source_raygen"), "set_stage_source", "get_stage_source", RD::SHADER_STAGE_RAYGEN);
+		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "source_any_hit"), "set_stage_source", "get_stage_source", RD::SHADER_STAGE_ANY_HIT);
+		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "source_closest_hit"), "set_stage_source", "get_stage_source", RD::SHADER_STAGE_CLOSEST_HIT);
+		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "source_miss"), "set_stage_source", "get_stage_source", RD::SHADER_STAGE_MISS);
+		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "source_intersection"), "set_stage_source", "get_stage_source", RD::SHADER_STAGE_INTERSECTION);
 		ADD_GROUP("Syntax", "source_");
 		ADD_PROPERTY(PropertyInfo(Variant::INT, "language", PROPERTY_HINT_RANGE, "GLSL,HLSL"), "set_language", "get_language");
 	}
@@ -286,7 +311,7 @@ public:
 			if (bytecode[i].size()) {
 				RD::ShaderStageSPIRVData stage;
 				stage.shader_stage = RD::ShaderStage(i);
-				stage.spir_v = bytecode[i];
+				stage.spirv = bytecode[i];
 				stages.push_back(stage);
 			}
 		}
@@ -317,19 +342,29 @@ protected:
 		ADD_PROPERTYI(PropertyInfo(Variant::PACKED_BYTE_ARRAY, "bytecode_tesselation_control"), "set_stage_bytecode", "get_stage_bytecode", RD::SHADER_STAGE_TESSELATION_CONTROL);
 		ADD_PROPERTYI(PropertyInfo(Variant::PACKED_BYTE_ARRAY, "bytecode_tesselation_evaluation"), "set_stage_bytecode", "get_stage_bytecode", RD::SHADER_STAGE_TESSELATION_EVALUATION);
 		ADD_PROPERTYI(PropertyInfo(Variant::PACKED_BYTE_ARRAY, "bytecode_compute"), "set_stage_bytecode", "get_stage_bytecode", RD::SHADER_STAGE_COMPUTE);
+		ADD_PROPERTYI(PropertyInfo(Variant::PACKED_BYTE_ARRAY, "bytecode_raygen"), "set_stage_bytecode", "get_stage_bytecode", RD::SHADER_STAGE_RAYGEN);
+		ADD_PROPERTYI(PropertyInfo(Variant::PACKED_BYTE_ARRAY, "bytecode_any_hit"), "set_stage_bytecode", "get_stage_bytecode", RD::SHADER_STAGE_ANY_HIT);
+		ADD_PROPERTYI(PropertyInfo(Variant::PACKED_BYTE_ARRAY, "bytecode_closest_hit"), "set_stage_bytecode", "get_stage_bytecode", RD::SHADER_STAGE_CLOSEST_HIT);
+		ADD_PROPERTYI(PropertyInfo(Variant::PACKED_BYTE_ARRAY, "bytecode_miss"), "set_stage_bytecode", "get_stage_bytecode", RD::SHADER_STAGE_MISS);
+		ADD_PROPERTYI(PropertyInfo(Variant::PACKED_BYTE_ARRAY, "bytecode_intersection"), "set_stage_bytecode", "get_stage_bytecode", RD::SHADER_STAGE_INTERSECTION);
 		ADD_GROUP("Compile Error", "compile_error_");
 		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "compile_error_vertex"), "set_stage_compile_error", "get_stage_compile_error", RD::SHADER_STAGE_VERTEX);
 		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "compile_error_fragment"), "set_stage_compile_error", "get_stage_compile_error", RD::SHADER_STAGE_FRAGMENT);
 		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "compile_error_tesselation_control"), "set_stage_compile_error", "get_stage_compile_error", RD::SHADER_STAGE_TESSELATION_CONTROL);
 		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "compile_error_tesselation_evaluation"), "set_stage_compile_error", "get_stage_compile_error", RD::SHADER_STAGE_TESSELATION_EVALUATION);
 		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "compile_error_compute"), "set_stage_compile_error", "get_stage_compile_error", RD::SHADER_STAGE_COMPUTE);
+		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "compile_error_raygen"), "set_stage_compile_error", "get_stage_compile_error", RD::SHADER_STAGE_RAYGEN);
+		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "compile_error_any_hit"), "set_stage_compile_error", "get_stage_compile_error", RD::SHADER_STAGE_ANY_HIT);
+		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "compile_error_closest_hit"), "set_stage_compile_error", "get_stage_compile_error", RD::SHADER_STAGE_CLOSEST_HIT);
+		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "compile_error_miss"), "set_stage_compile_error", "get_stage_compile_error", RD::SHADER_STAGE_MISS);
+		ADD_PROPERTYI(PropertyInfo(Variant::STRING, "compile_error_intersection"), "set_stage_compile_error", "get_stage_compile_error", RD::SHADER_STAGE_INTERSECTION);
 	}
 };
 
 class RDShaderFile : public Resource {
 	GDCLASS(RDShaderFile, Resource)
 
-	Map<StringName, Ref<RDShaderSPIRV>> versions;
+	HashMap<StringName, Ref<RDShaderSPIRV>> versions;
 	String base_error;
 
 public:
@@ -349,13 +384,18 @@ public:
 		return versions[p_version]->get_stages();
 	}
 
-	Vector<StringName> get_version_list() const {
+	TypedArray<StringName> get_version_list() const {
 		Vector<StringName> vnames;
 		for (const KeyValue<StringName, Ref<RDShaderSPIRV>> &E : versions) {
 			vnames.push_back(E.key);
 		}
 		vnames.sort_custom<StringName::AlphCompare>();
-		return vnames;
+		TypedArray<StringName> ret;
+		ret.resize(vnames.size());
+		for (int i = 0; i < vnames.size(); i++) {
+			ret[i] = vnames[i];
+		}
+		return ret;
 	}
 
 	void set_base_error(const String &p_error) {
@@ -368,13 +408,13 @@ public:
 	}
 
 	void print_errors(const String &p_file) {
-		if (base_error != "") {
+		if (!base_error.is_empty()) {
 			ERR_PRINT("Error parsing shader '" + p_file + "':\n\n" + base_error);
 		} else {
 			for (KeyValue<StringName, Ref<RDShaderSPIRV>> &E : versions) {
 				for (int i = 0; i < RD::SHADER_STAGE_MAX; i++) {
 					String error = E.value->get_stage_compile_error(RD::ShaderStage(i));
-					if (error != String()) {
+					if (!error.is_empty()) {
 						static const char *stage_str[RD::SHADER_STAGE_MAX] = {
 							"vertex",
 							"fragment",
@@ -383,7 +423,7 @@ public:
 							"compute"
 						};
 
-						ERR_PRINT("Error parsing shader '" + p_file + "', version '" + String(E.key) + "', stage '" + stage_str[i] + "':\n\n" + error);
+						print_error("Error parsing shader '" + p_file + "', version '" + String(E.key) + "', stage '" + stage_str[i] + "':\n\n" + error);
 					}
 				}
 			}
@@ -395,7 +435,7 @@ public:
 
 protected:
 	Dictionary _get_versions() const {
-		Vector<StringName> vnames = get_version_list();
+		TypedArray<StringName> vnames = get_version_list();
 		Dictionary ret;
 		for (int i = 0; i < vnames.size(); i++) {
 			ret[vnames[i]] = versions[vnames[i]];
@@ -404,13 +444,11 @@ protected:
 	}
 	void _set_versions(const Dictionary &p_versions) {
 		versions.clear();
-		List<Variant> keys;
-		p_versions.get_key_list(&keys);
-		for (const Variant &E : keys) {
-			StringName name = E;
-			Ref<RDShaderSPIRV> bc = p_versions[E];
+		for (const KeyValue<Variant, Variant> &kv : p_versions) {
+			StringName vname = kv.key;
+			Ref<RDShaderSPIRV> bc = kv.value;
 			ERR_CONTINUE(bc.is_null());
-			versions[name] = bc;
+			versions[vname] = bc;
 		}
 
 		emit_changed();
@@ -435,29 +473,30 @@ protected:
 class RDUniform : public RefCounted {
 	GDCLASS(RDUniform, RefCounted)
 	friend class RenderingDevice;
+	friend class UniformSetCacheRD;
 	RD::Uniform base;
 
 public:
 	RD_SETGET(RD::UniformType, uniform_type)
 	RD_SETGET(int32_t, binding)
 
-	void add_id(const RID &p_id) { base.ids.push_back(p_id); }
-	void clear_ids() { base.ids.clear(); }
-	Array get_ids() const {
-		Array ids;
-		for (int i = 0; i < base.ids.size(); i++) {
-			ids.push_back(base.ids[i]);
+	void add_id(const RID &p_id) { base.append_id(p_id); }
+	void clear_ids() { base.clear_ids(); }
+	TypedArray<RID> get_ids() const {
+		TypedArray<RID> ids;
+		for (uint32_t i = 0; i < base.get_id_count(); i++) {
+			ids.push_back(base.get_id(i));
 		}
 		return ids;
 	}
 
 protected:
-	void _set_ids(const Array &p_ids) {
-		base.ids.clear();
+	void _set_ids(const TypedArray<RID> &p_ids) {
+		base.clear_ids();
 		for (int i = 0; i < p_ids.size(); i++) {
 			RID id = p_ids[i];
 			ERR_FAIL_COND(id.is_null());
-			base.ids.push_back(id);
+			base.append_id(id);
 		}
 	}
 	static void _bind_methods() {
@@ -517,7 +556,7 @@ public:
 	RD_SETGET(bool, wireframe)
 	RD_SETGET(RD::PolygonCullMode, cull_mode)
 	RD_SETGET(RD::PolygonFrontFace, front_face)
-	RD_SETGET(bool, depth_bias_enable)
+	RD_SETGET(bool, depth_bias_enabled)
 	RD_SETGET(float, depth_bias_constant_factor)
 	RD_SETGET(float, depth_bias_clamp)
 	RD_SETGET(float, depth_bias_slope_factor)
@@ -531,7 +570,7 @@ protected:
 		RD_BIND(Variant::BOOL, RDPipelineRasterizationState, wireframe);
 		RD_BIND(Variant::INT, RDPipelineRasterizationState, cull_mode);
 		RD_BIND(Variant::INT, RDPipelineRasterizationState, front_face);
-		RD_BIND(Variant::BOOL, RDPipelineRasterizationState, depth_bias_enable);
+		RD_BIND(Variant::BOOL, RDPipelineRasterizationState, depth_bias_enabled);
 		RD_BIND(Variant::FLOAT, RDPipelineRasterizationState, depth_bias_constant_factor);
 		RD_BIND(Variant::FLOAT, RDPipelineRasterizationState, depth_bias_clamp);
 		RD_BIND(Variant::FLOAT, RDPipelineRasterizationState, depth_bias_slope_factor);
@@ -688,7 +727,7 @@ public:
 	RD_SETGET(Color, blend_constant)
 
 	void set_attachments(const TypedArray<RDPipelineColorBlendStateAttachment> &p_attachments) {
-		attachments.push_back(p_attachments);
+		attachments = p_attachments;
 	}
 
 	TypedArray<RDPipelineColorBlendStateAttachment> get_attachments() const {
@@ -707,4 +746,125 @@ protected:
 	}
 };
 
-#endif // RENDERING_DEVICE_BINDS_H
+class RDAccelerationStructureGeometry : public RefCounted {
+	GDCLASS(RDAccelerationStructureGeometry, RefCounted)
+	friend class RenderingDevice;
+	RD::AccelerationStructureGeometry base;
+
+public:
+	RD_SETGET(BitField<RD::AccelerationStructureGeometryFlagBits>, flags)
+	RD_SETGET(RID, vertex_buffer)
+	RD_SETGET(uint32_t, vertex_offset)
+	RD_SETGET(uint32_t, vertex_stride)
+	RD_SETGET(uint32_t, vertex_count)
+	RD_SETGET(RD::DataFormat, vertex_format)
+	RD_SETGET(RID, index_buffer)
+	RD_SETGET(uint32_t, index_offset)
+	RD_SETGET(uint32_t, index_count)
+
+protected:
+	static void _bind_methods() {
+		RD_BIND(Variant::INT, RDAccelerationStructureGeometry, flags);
+		RD_BIND(Variant::RID, RDAccelerationStructureGeometry, vertex_buffer);
+		RD_BIND(Variant::INT, RDAccelerationStructureGeometry, vertex_offset);
+		RD_BIND(Variant::INT, RDAccelerationStructureGeometry, vertex_stride);
+		RD_BIND(Variant::INT, RDAccelerationStructureGeometry, vertex_count);
+		RD_BIND(Variant::INT, RDAccelerationStructureGeometry, vertex_format);
+		RD_BIND(Variant::RID, RDAccelerationStructureGeometry, index_buffer);
+		RD_BIND(Variant::INT, RDAccelerationStructureGeometry, index_offset);
+		RD_BIND(Variant::INT, RDAccelerationStructureGeometry, index_count);
+	}
+};
+
+class RDAccelerationStructureInstance : public RefCounted {
+	GDCLASS(RDAccelerationStructureInstance, RefCounted)
+	friend class RenderingDevice;
+	RD::AccelerationStructureInstance base;
+
+public:
+	RD_SETGET(Transform3D, transform)
+	RD_SETGET(uint32_t, id)
+	RD_SETGET(uint8_t, mask)
+	RD_SETGET(RD::HitShaderBindingTableRange, hit_sbt_range)
+	RD_SETGET(BitField<RD::AccelerationStructureInstanceFlagBits>, flags)
+	RD_SETGET(RID, blas)
+
+protected:
+	static void _bind_methods() {
+		RD_BIND(Variant::TRANSFORM3D, RDAccelerationStructureInstance, transform);
+		RD_BIND(Variant::INT, RDAccelerationStructureInstance, id);
+		RD_BIND(Variant::INT, RDAccelerationStructureInstance, mask);
+		RD_BIND(Variant::INT, RDAccelerationStructureInstance, hit_sbt_range);
+		RD_BIND(Variant::INT, RDAccelerationStructureInstance, flags);
+		RD_BIND(Variant::RID, RDAccelerationStructureInstance, blas);
+	}
+};
+
+class RDPipelineShader : public RefCounted {
+	GDCLASS(RDPipelineShader, RefCounted)
+	friend class RenderingDevice;
+	RD::PipelineShader base;
+
+	TypedArray<RDPipelineSpecializationConstant> specialization_constants;
+
+public:
+	RD_SETGET(RID, shader)
+
+	void set_specialization_constants(const TypedArray<RDPipelineSpecializationConstant> &p_specialization_constants) {
+		specialization_constants = p_specialization_constants;
+	}
+
+	TypedArray<RDPipelineSpecializationConstant> get_specialization_constants() const {
+		return specialization_constants;
+	}
+
+protected:
+	static void _bind_methods() {
+		RD_BIND(Variant::RID, RDPipelineShader, shader);
+
+		ClassDB::bind_method(D_METHOD("set_specialization_constants", "specialization_constants"), &RDPipelineShader::set_specialization_constants);
+		ClassDB::bind_method(D_METHOD("get_specialization_constants"), &RDPipelineShader::get_specialization_constants);
+		ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "specialization_constants", PROPERTY_HINT_ARRAY_TYPE, "RDPipelineSpecializationConstant"), "set_specialization_constants", "get_specialization_constants");
+	}
+};
+
+class RDHitGroup : public RefCounted {
+	GDCLASS(RDHitGroup, RefCounted)
+	friend class RenderingDevice;
+
+	Ref<RDPipelineShader> closest_hit_shader;
+	Ref<RDPipelineShader> any_hit_shader;
+	Ref<RDPipelineShader> intersection_shader;
+
+public:
+	void set_closest_hit_shader(const Ref<RDPipelineShader> &p_closest_hit_shader) {
+		closest_hit_shader = p_closest_hit_shader;
+	}
+
+	Ref<RDPipelineShader> get_closest_hit_shader() const {
+		return closest_hit_shader;
+	}
+
+	void set_any_hit_shader(const Ref<RDPipelineShader> &p_any_hit_shader) {
+		any_hit_shader = p_any_hit_shader;
+	}
+
+	Ref<RDPipelineShader> get_any_hit_shader() const {
+		return any_hit_shader;
+	}
+
+	void set_intersection_shader(const Ref<RDPipelineShader> &p_intersection_shader) {
+		intersection_shader = p_intersection_shader;
+	}
+
+	Ref<RDPipelineShader> get_intersection_shader() const {
+		return intersection_shader;
+	}
+
+protected:
+	static void _bind_methods() {
+		RD_BIND(Variant::OBJECT, RDHitGroup, closest_hit_shader);
+		RD_BIND(Variant::OBJECT, RDHitGroup, any_hit_shader);
+		RD_BIND(Variant::OBJECT, RDHitGroup, intersection_shader);
+	}
+};

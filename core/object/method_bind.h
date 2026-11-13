@@ -1,53 +1,37 @@
-/*************************************************************************/
-/*  method_bind.h                                                        */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  method_bind.h                                                         */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
-#ifndef METHOD_BIND_H
-#define METHOD_BIND_H
+#pragma once
 
-#include "core/variant/binder_common.h"
-
-enum MethodFlags {
-	METHOD_FLAG_NORMAL = 1,
-	METHOD_FLAG_EDITOR = 2,
-	METHOD_FLAG_NOSCRIPT = 4,
-	METHOD_FLAG_CONST = 8,
-	METHOD_FLAG_REVERSE = 16, // used for events
-	METHOD_FLAG_VIRTUAL = 32,
-	METHOD_FLAG_FROM_SCRIPT = 64,
-	METHOD_FLAG_VARARG = 128,
-	METHOD_FLAG_STATIC = 256,
-	METHOD_FLAG_OBJECT_CORE = 512,
-	METHOD_FLAGS_DEFAULT = METHOD_FLAG_NORMAL,
-};
-
-VARIANT_ENUM_CAST(MethodFlags)
+#include "core/variant/type_info.h"
+#include "core/variant/variant.h"
 
 // some helpers
 
@@ -60,15 +44,18 @@ class MethodBind {
 	int default_argument_count = 0;
 	int argument_count = 0;
 
+	bool _static = false;
 	bool _const = false;
 	bool _returns = false;
+	bool _returns_raw_obj_ptr = false;
 
 protected:
 	Variant::Type *argument_types = nullptr;
-#ifdef DEBUG_METHODS_ENABLED
+#ifdef DEBUG_ENABLED
 	Vector<StringName> arg_names;
-#endif
+#endif // DEBUG_ENABLED
 	void _set_const(bool p_const);
+	void _set_static(bool p_static);
 	void _set_returns(bool p_returns);
 	virtual Variant::Type _gen_argument_type(int p_arg) const = 0;
 	virtual PropertyInfo _gen_argument_type_info(int p_arg) const = 0;
@@ -101,461 +88,201 @@ public:
 	}
 
 	_FORCE_INLINE_ Variant::Type get_argument_type(int p_argument) const {
-		ERR_FAIL_COND_V(p_argument < -1 || p_argument > argument_count, Variant::NIL);
+		ERR_FAIL_COND_V(p_argument < -1 || p_argument >= argument_count, Variant::NIL);
 		return argument_types[p_argument + 1];
 	}
 
 	PropertyInfo get_argument_info(int p_argument) const;
 	PropertyInfo get_return_info() const;
 
-#ifdef DEBUG_METHODS_ENABLED
+#ifdef DEBUG_ENABLED
 	void set_argument_names(const Vector<StringName> &p_names); // Set by ClassDB, can't be inferred otherwise.
 	Vector<StringName> get_argument_names() const;
 
 	virtual GodotTypeInfo::Metadata get_argument_meta(int p_arg) const = 0;
-#endif
+#endif // DEBUG_ENABLED
 
 	void set_hint_flags(uint32_t p_hint) { hint_flags = p_hint; }
-	uint32_t get_hint_flags() const { return hint_flags | (is_const() ? METHOD_FLAG_CONST : 0) | (is_vararg() ? METHOD_FLAG_VARARG : 0); }
+	uint32_t get_hint_flags() const { return hint_flags | (is_const() ? METHOD_FLAG_CONST : 0) | (is_vararg() ? METHOD_FLAG_VARARG : 0) | (is_static() ? METHOD_FLAG_STATIC : 0); }
 	_FORCE_INLINE_ StringName get_instance_class() const { return instance_class; }
 	_FORCE_INLINE_ void set_instance_class(const StringName &p_class) { instance_class = p_class; }
 
-	_FORCE_INLINE_ int get_argument_count() const { return argument_count; };
+	_FORCE_INLINE_ int get_argument_count() const { return argument_count; }
 
-	virtual Variant call(Object *p_object, const Variant **p_args, int p_arg_count, Callable::CallError &r_error) = 0;
-	virtual void ptrcall(Object *p_object, const void **p_args, void *r_ret) = 0;
+#ifdef TOOLS_ENABLED
+	virtual bool is_valid() const { return true; }
+#endif
+
+	virtual Variant call(Object *p_object, const Variant **p_args, int p_arg_count, Callable::CallError &r_error) const = 0;
+	virtual void validated_call(Object *p_object, const Variant **p_args, Variant *r_ret) const = 0;
+
+	virtual void ptrcall(Object *p_object, const void **p_args, void *r_ret) const = 0;
 
 	StringName get_name() const;
 	void set_name(const StringName &p_name);
 	_FORCE_INLINE_ int get_method_id() const { return method_id; }
 	_FORCE_INLINE_ bool is_const() const { return _const; }
+	_FORCE_INLINE_ bool is_static() const { return _static; }
 	_FORCE_INLINE_ bool has_return() const { return _returns; }
 	virtual bool is_vararg() const { return false; }
+
+	_FORCE_INLINE_ bool is_return_type_raw_object_ptr() { return _returns_raw_obj_ptr; }
+	_FORCE_INLINE_ void set_return_type_is_raw_object_ptr(bool p_returns_raw_obj) { _returns_raw_obj_ptr = p_returns_raw_obj; }
 
 	void set_default_arguments(const Vector<Variant> &p_defargs);
 
 	uint32_t get_hash() const;
 
-	MethodBind();
+	// No-inline to save on binary space with LTO.
+	_NO_INLINE_ MethodBind();
 	virtual ~MethodBind();
 };
 
-template <class T>
-class MethodBindVarArg : public MethodBind {
-public:
-	typedef Variant (T::*NativeCall)(const Variant **, int, Callable::CallError &);
-
+// MethodBindVarArg base CRTP
+template <typename Derived, typename T, typename R, bool should_returns>
+class MethodBindVarArgBase : public MethodBind {
 protected:
-	NativeCall call_method = nullptr;
-	MethodInfo arguments;
+	R (T::*method)(const Variant **, int, Callable::CallError &);
+	MethodInfo method_info;
 
 public:
-	virtual PropertyInfo _gen_argument_type_info(int p_arg) const {
+	virtual PropertyInfo _gen_argument_type_info(int p_arg) const override {
 		if (p_arg < 0) {
-			return arguments.return_val;
-		} else if (p_arg < arguments.arguments.size()) {
-			return arguments.arguments[p_arg];
+			return _gen_return_type_info();
+		} else if (p_arg < method_info.arguments.size()) {
+			return method_info.arguments[p_arg];
 		} else {
 			return PropertyInfo(Variant::NIL, "arg_" + itos(p_arg), PROPERTY_HINT_NONE, String(), PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_NIL_IS_VARIANT);
 		}
 	}
 
-	virtual Variant::Type _gen_argument_type(int p_arg) const {
+	virtual Variant::Type _gen_argument_type(int p_arg) const override {
 		return _gen_argument_type_info(p_arg).type;
 	}
 
-#ifdef DEBUG_METHODS_ENABLED
-	virtual GodotTypeInfo::Metadata get_argument_meta(int) const {
+#ifdef DEBUG_ENABLED
+	virtual GodotTypeInfo::Metadata get_argument_meta(int) const override {
 		return GodotTypeInfo::METADATA_NONE;
 	}
-#endif
+#endif // DEBUG_ENABLED
 
-	virtual Variant call(Object *p_object, const Variant **p_args, int p_arg_count, Callable::CallError &r_error) {
-		T *instance = static_cast<T *>(p_object);
-		return (instance->*call_method)(p_args, p_arg_count, r_error);
+	virtual void validated_call(Object *p_object, const Variant **p_args, Variant *r_ret) const override {
+		ERR_FAIL_MSG("Validated call can't be used with vararg methods. This is a bug.");
 	}
 
-	void set_method_info(const MethodInfo &p_info, bool p_return_nil_is_variant) {
-		set_argument_count(p_info.arguments.size());
-		Variant::Type *at = memnew_arr(Variant::Type, p_info.arguments.size() + 1);
-		at[0] = p_info.return_val.type;
-		if (p_info.arguments.size()) {
-#ifdef DEBUG_METHODS_ENABLED
-			Vector<StringName> names;
-			names.resize(p_info.arguments.size());
-#endif
-			for (int i = 0; i < p_info.arguments.size(); i++) {
-				at[i + 1] = p_info.arguments[i].type;
-#ifdef DEBUG_METHODS_ENABLED
-				names.write[i] = p_info.arguments[i].name;
-#endif
-			}
-
-#ifdef DEBUG_METHODS_ENABLED
-			set_argument_names(names);
-#endif
-		}
-		argument_types = at;
-		arguments = p_info;
-		if (p_return_nil_is_variant) {
-			arguments.return_val.usage |= PROPERTY_USAGE_NIL_IS_VARIANT;
-		}
+	virtual void ptrcall(Object *p_object, const void **p_args, void *r_ret) const override {
+		ERR_FAIL_MSG("ptrcall can't be used with vararg methods. This is a bug.");
 	}
 
-	virtual void ptrcall(Object *p_object, const void **p_args, void *r_ret) {
-		ERR_FAIL(); // Can't call.
-	}
-
-	void set_method(NativeCall p_method) { call_method = p_method; }
 	virtual bool is_const() const { return false; }
 
-	virtual bool is_vararg() const { return true; }
+	virtual bool is_vararg() const override { return true; }
 
-	MethodBindVarArg() {
-		_set_returns(true);
+	MethodBindVarArgBase(
+			R (T::*p_method)(const Variant **, int, Callable::CallError &),
+			const MethodInfo &p_method_info,
+			bool p_return_nil_is_variant) :
+			method(p_method), method_info(p_method_info) {
+		set_argument_count(method_info.arguments.size());
+		Variant::Type *at = memnew_arr(Variant::Type, method_info.arguments.size() + 1);
+		at[0] = _gen_return_type_info().type;
+		if (method_info.arguments.size()) {
+#ifdef DEBUG_ENABLED
+			Vector<StringName> names;
+			names.resize(method_info.arguments.size());
+#endif // DEBUG_ENABLED
+			for (int64_t i = 0; i < method_info.arguments.size(); ++i) {
+				at[i + 1] = method_info.arguments[i].type;
+#ifdef DEBUG_ENABLED
+				names.write[i] = method_info.arguments[i].name;
+#endif // DEBUG_ENABLED
+			}
+
+#ifdef DEBUG_ENABLED
+			set_argument_names(names);
+#endif // DEBUG_ENABLED
+		}
+		argument_types = at;
+		if (p_return_nil_is_variant) {
+			method_info.return_val.usage |= PROPERTY_USAGE_NIL_IS_VARIANT;
+		}
+
+		_set_returns(should_returns);
+	}
+
+private:
+	PropertyInfo _gen_return_type_info() const {
+		return Derived::_gen_return_type_info_impl();
 	}
 };
 
-template <class T>
-MethodBind *create_vararg_method_bind(Variant (T::*p_method)(const Variant **, int, Callable::CallError &), const MethodInfo &p_info, bool p_return_nil_is_variant) {
-	MethodBindVarArg<T> *a = memnew((MethodBindVarArg<T>));
-	a->set_method(p_method);
-	a->set_method_info(p_info, p_return_nil_is_variant);
-	a->set_instance_class(T::get_class_static());
-	return a;
-}
-
-/**** VARIADIC TEMPLATES ****/
-
-#ifndef TYPED_METHOD_BIND
-class __UnexistingClass;
-#define MB_T __UnexistingClass
-#else
-#define MB_T T
-#endif
-
-// no return, not const
-#ifdef TYPED_METHOD_BIND
-template <class T, class... P>
-#else
-template <class... P>
-#endif
-class MethodBindT : public MethodBind {
-	void (MB_T::*method)(P...);
-
-protected:
-// GCC raises warnings in the case P = {} as the comparison is always false...
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wlogical-op"
-#endif
-	virtual Variant::Type _gen_argument_type(int p_arg) const {
-		if (p_arg >= 0 && p_arg < (int)sizeof...(P)) {
-			return call_get_argument_type<P...>(p_arg);
-		} else {
-			return Variant::NIL;
-		}
-	}
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
-
-	virtual PropertyInfo _gen_argument_type_info(int p_arg) const {
-		PropertyInfo pi;
-		call_get_argument_type_info<P...>(p_arg, pi);
-		return pi;
-	}
+// variadic, no return
+template <typename T>
+class MethodBindVarArgT : public MethodBindVarArgBase<MethodBindVarArgT<T>, T, void, false> {
+	friend class MethodBindVarArgBase<MethodBindVarArgT<T>, T, void, false>;
 
 public:
-#ifdef DEBUG_METHODS_ENABLED
-	virtual GodotTypeInfo::Metadata get_argument_meta(int p_arg) const {
-		return call_get_argument_metadata<P...>(p_arg);
+	virtual Variant call(Object *p_object, const Variant **p_args, int p_arg_count, Callable::CallError &r_error) const override {
+#ifdef TOOLS_ENABLED
+		ERR_FAIL_COND_V_MSG(p_object && p_object->is_extension_placeholder() && p_object->get_class_name() == MethodBind::get_instance_class(), Variant(), vformat("Cannot call method bind '%s' on placeholder instance.", MethodBind::get_name()));
+#endif
+		(static_cast<T *>(p_object)->*MethodBindVarArgBase<MethodBindVarArgT<T>, T, void, false>::method)(p_args, p_arg_count, r_error);
+		return {};
 	}
 
-#endif
-	virtual Variant call(Object *p_object, const Variant **p_args, int p_arg_count, Callable::CallError &r_error) {
-#ifdef TYPED_METHOD_BIND
-		call_with_variant_args_dv(static_cast<T *>(p_object), method, p_args, p_arg_count, r_error, get_default_arguments());
-#else
-		call_with_variant_args_dv((MB_T *)(p_object), method, p_args, p_arg_count, r_error, get_default_arguments());
-#endif
-		return Variant();
+	MethodBindVarArgT(
+			void (T::*p_method)(const Variant **, int, Callable::CallError &),
+			const MethodInfo &p_method_info,
+			bool p_return_nil_is_variant) :
+			MethodBindVarArgBase<MethodBindVarArgT<T>, T, void, false>(p_method, p_method_info, p_return_nil_is_variant) {
 	}
 
-	virtual void ptrcall(Object *p_object, const void **p_args, void *r_ret) {
-#ifdef TYPED_METHOD_BIND
-		call_with_ptr_args<T, P...>(static_cast<T *>(p_object), method, p_args);
-#else
-		call_with_ptr_args<MB_T, P...>((MB_T *)(p_object), method, p_args);
-#endif
-	}
-
-	MethodBindT(void (MB_T::*p_method)(P...)) {
-		method = p_method;
-		_generate_argument_types(sizeof...(P));
-		set_argument_count(sizeof...(P));
+private:
+	static PropertyInfo _gen_return_type_info_impl() {
+		return {};
 	}
 };
 
-template <class T, class... P>
-MethodBind *create_method_bind(void (T::*p_method)(P...)) {
-#ifdef TYPED_METHOD_BIND
-	MethodBind *a = memnew((MethodBindT<T, P...>)(p_method));
-#else
-	MethodBind *a = memnew((MethodBindT<P...>)(reinterpret_cast<void (MB_T::*)(P...)>(p_method)));
-#endif
+template <typename T>
+MethodBind *create_vararg_method_bind(void (T::*p_method)(const Variant **, int, Callable::CallError &), const MethodInfo &p_info, bool p_return_nil_is_variant) {
+	MethodBind *a = memnew((MethodBindVarArgT<T>)(p_method, p_info, p_return_nil_is_variant));
 	a->set_instance_class(T::get_class_static());
 	return a;
 }
 
-// no return, not const
-
-#ifdef TYPED_METHOD_BIND
-template <class T, class... P>
-#else
-template <class... P>
-#endif
-class MethodBindTC : public MethodBind {
-	void (MB_T::*method)(P...) const;
-
-protected:
-// GCC raises warnings in the case P = {} as the comparison is always false...
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wlogical-op"
-#endif
-	virtual Variant::Type _gen_argument_type(int p_arg) const {
-		if (p_arg >= 0 && p_arg < (int)sizeof...(P)) {
-			return call_get_argument_type<P...>(p_arg);
-		} else {
-			return Variant::NIL;
-		}
-	}
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
-
-	virtual PropertyInfo _gen_argument_type_info(int p_arg) const {
-		PropertyInfo pi;
-		call_get_argument_type_info<P...>(p_arg, pi);
-		return pi;
-	}
+// variadic, return
+template <typename T, typename R>
+class MethodBindVarArgTR : public MethodBindVarArgBase<MethodBindVarArgTR<T, R>, T, R, true> {
+	friend class MethodBindVarArgBase<MethodBindVarArgTR<T, R>, T, R, true>;
 
 public:
-#ifdef DEBUG_METHODS_ENABLED
-	virtual GodotTypeInfo::Metadata get_argument_meta(int p_arg) const {
-		return call_get_argument_metadata<P...>(p_arg);
+	GODOT_GCC_WARNING_PUSH_AND_IGNORE("-Wmaybe-uninitialized") // Workaround GH-66343 raised only with UBSAN, seems to be a false positive.
+
+	virtual Variant call(Object *p_object, const Variant **p_args, int p_arg_count, Callable::CallError &r_error) const override {
+#ifdef TOOLS_ENABLED
+		ERR_FAIL_COND_V_MSG(p_object && p_object->is_extension_placeholder() && p_object->get_class_name() == MethodBind::get_instance_class(), Variant(), vformat("Cannot call method bind '%s' on placeholder instance.", MethodBind::get_name()));
+#endif
+		return (static_cast<T *>(p_object)->*MethodBindVarArgBase<MethodBindVarArgTR<T, R>, T, R, true>::method)(p_args, p_arg_count, r_error);
 	}
 
-#endif
-	virtual Variant call(Object *p_object, const Variant **p_args, int p_arg_count, Callable::CallError &r_error) {
-#ifdef TYPED_METHOD_BIND
-		call_with_variant_argsc_dv(static_cast<T *>(p_object), method, p_args, p_arg_count, r_error, get_default_arguments());
-#else
-		call_with_variant_argsc_dv((MB_T *)(p_object), method, p_args, p_arg_count, r_error, get_default_arguments());
-#endif
-		return Variant();
+	GODOT_GCC_WARNING_POP
+
+	MethodBindVarArgTR(
+			R (T::*p_method)(const Variant **, int, Callable::CallError &),
+			const MethodInfo &p_info,
+			bool p_return_nil_is_variant) :
+			MethodBindVarArgBase<MethodBindVarArgTR<T, R>, T, R, true>(p_method, p_info, p_return_nil_is_variant) {
 	}
 
-	virtual void ptrcall(Object *p_object, const void **p_args, void *r_ret) {
-#ifdef TYPED_METHOD_BIND
-		call_with_ptr_argsc<T, P...>(static_cast<T *>(p_object), method, p_args);
-#else
-		call_with_ptr_argsc<MB_T, P...>((MB_T *)(p_object), method, p_args);
-#endif
-	}
-
-	MethodBindTC(void (MB_T::*p_method)(P...) const) {
-		method = p_method;
-		_set_const(true);
-		_generate_argument_types(sizeof...(P));
-		set_argument_count(sizeof...(P));
+private:
+	static PropertyInfo _gen_return_type_info_impl() {
+		return GetTypeInfo<R>::get_class_info();
 	}
 };
 
-template <class T, class... P>
-MethodBind *create_method_bind(void (T::*p_method)(P...) const) {
-#ifdef TYPED_METHOD_BIND
-	MethodBind *a = memnew((MethodBindTC<T, P...>)(p_method));
-#else
-	MethodBind *a = memnew((MethodBindTC<P...>)(reinterpret_cast<void (MB_T::*)(P...) const>(p_method)));
-#endif
+template <typename T, typename R>
+MethodBind *create_vararg_method_bind(R (T::*p_method)(const Variant **, int, Callable::CallError &), const MethodInfo &p_info, bool p_return_nil_is_variant) {
+	MethodBind *a = memnew((MethodBindVarArgTR<T, R>)(p_method, p_info, p_return_nil_is_variant));
 	a->set_instance_class(T::get_class_static());
 	return a;
 }
-
-// return, not const
-
-#ifdef TYPED_METHOD_BIND
-template <class T, class R, class... P>
-#else
-template <class R, class... P>
-#endif
-class MethodBindTR : public MethodBind {
-	R(MB_T::*method)
-	(P...);
-
-protected:
-// GCC raises warnings in the case P = {} as the comparison is always false...
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wlogical-op"
-#endif
-	virtual Variant::Type _gen_argument_type(int p_arg) const {
-		if (p_arg >= 0 && p_arg < (int)sizeof...(P)) {
-			return call_get_argument_type<P...>(p_arg);
-		} else {
-			return GetTypeInfo<R>::VARIANT_TYPE;
-		}
-	}
-
-	virtual PropertyInfo _gen_argument_type_info(int p_arg) const {
-		if (p_arg >= 0 && p_arg < (int)sizeof...(P)) {
-			PropertyInfo pi;
-			call_get_argument_type_info<P...>(p_arg, pi);
-			return pi;
-		} else {
-			return GetTypeInfo<R>::get_class_info();
-		}
-	}
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
-
-public:
-#ifdef DEBUG_METHODS_ENABLED
-	virtual GodotTypeInfo::Metadata get_argument_meta(int p_arg) const {
-		if (p_arg >= 0) {
-			return call_get_argument_metadata<P...>(p_arg);
-		} else {
-			return GetTypeInfo<R>::METADATA;
-		}
-	}
-#endif
-
-	virtual Variant call(Object *p_object, const Variant **p_args, int p_arg_count, Callable::CallError &r_error) {
-		Variant ret;
-#ifdef TYPED_METHOD_BIND
-		call_with_variant_args_ret_dv(static_cast<T *>(p_object), method, p_args, p_arg_count, ret, r_error, get_default_arguments());
-#else
-		call_with_variant_args_ret_dv((MB_T *)p_object, method, p_args, p_arg_count, ret, r_error, get_default_arguments());
-#endif
-		return ret;
-	}
-
-	virtual void ptrcall(Object *p_object, const void **p_args, void *r_ret) {
-#ifdef TYPED_METHOD_BIND
-		call_with_ptr_args_ret<T, R, P...>(static_cast<T *>(p_object), method, p_args, r_ret);
-#else
-		call_with_ptr_args_ret<MB_T, R, P...>((MB_T *)(p_object), method, p_args, r_ret);
-#endif
-	}
-
-	MethodBindTR(R (MB_T::*p_method)(P...)) {
-		method = p_method;
-		_set_returns(true);
-		_generate_argument_types(sizeof...(P));
-		set_argument_count(sizeof...(P));
-	}
-};
-
-template <class T, class R, class... P>
-MethodBind *create_method_bind(R (T::*p_method)(P...)) {
-#ifdef TYPED_METHOD_BIND
-	MethodBind *a = memnew((MethodBindTR<T, R, P...>)(p_method));
-#else
-	MethodBind *a = memnew((MethodBindTR<R, P...>)(reinterpret_cast<R (MB_T::*)(P...)>(p_method)));
-#endif
-
-	a->set_instance_class(T::get_class_static());
-	return a;
-}
-
-// return, const
-
-#ifdef TYPED_METHOD_BIND
-template <class T, class R, class... P>
-#else
-template <class R, class... P>
-#endif
-class MethodBindTRC : public MethodBind {
-	R(MB_T::*method)
-	(P...) const;
-
-protected:
-// GCC raises warnings in the case P = {} as the comparison is always false...
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wlogical-op"
-#endif
-	virtual Variant::Type _gen_argument_type(int p_arg) const {
-		if (p_arg >= 0 && p_arg < (int)sizeof...(P)) {
-			return call_get_argument_type<P...>(p_arg);
-		} else {
-			return GetTypeInfo<R>::VARIANT_TYPE;
-		}
-	}
-
-	virtual PropertyInfo _gen_argument_type_info(int p_arg) const {
-		if (p_arg >= 0 && p_arg < (int)sizeof...(P)) {
-			PropertyInfo pi;
-			call_get_argument_type_info<P...>(p_arg, pi);
-			return pi;
-		} else {
-			return GetTypeInfo<R>::get_class_info();
-		}
-	}
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
-
-public:
-#ifdef DEBUG_METHODS_ENABLED
-	virtual GodotTypeInfo::Metadata get_argument_meta(int p_arg) const {
-		if (p_arg >= 0) {
-			return call_get_argument_metadata<P...>(p_arg);
-		} else {
-			return GetTypeInfo<R>::METADATA;
-		}
-	}
-#endif
-
-	virtual Variant call(Object *p_object, const Variant **p_args, int p_arg_count, Callable::CallError &r_error) {
-		Variant ret;
-#ifdef TYPED_METHOD_BIND
-		call_with_variant_args_retc_dv(static_cast<T *>(p_object), method, p_args, p_arg_count, ret, r_error, get_default_arguments());
-#else
-		call_with_variant_args_retc_dv((MB_T *)(p_object), method, p_args, p_arg_count, ret, r_error, get_default_arguments());
-#endif
-		return ret;
-	}
-
-	virtual void ptrcall(Object *p_object, const void **p_args, void *r_ret) {
-#ifdef TYPED_METHOD_BIND
-		call_with_ptr_args_retc<T, R, P...>(static_cast<T *>(p_object), method, p_args, r_ret);
-#else
-		call_with_ptr_args_retc<MB_T, R, P...>((MB_T *)(p_object), method, p_args, r_ret);
-#endif
-	}
-
-	MethodBindTRC(R (MB_T::*p_method)(P...) const) {
-		method = p_method;
-		_set_returns(true);
-		_set_const(true);
-		_generate_argument_types(sizeof...(P));
-		set_argument_count(sizeof...(P));
-	}
-};
-
-template <class T, class R, class... P>
-MethodBind *create_method_bind(R (T::*p_method)(P...) const) {
-#ifdef TYPED_METHOD_BIND
-	MethodBind *a = memnew((MethodBindTRC<T, R, P...>)(p_method));
-#else
-	MethodBind *a = memnew((MethodBindTRC<R, P...>)(reinterpret_cast<R (MB_T::*)(P...) const>(p_method)));
-#endif
-	a->set_instance_class(T::get_class_static());
-	return a;
-}
-
-#endif // METHOD_BIND_H

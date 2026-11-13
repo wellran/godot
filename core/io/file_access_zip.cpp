@@ -1,32 +1,32 @@
-/*************************************************************************/
-/*  file_access_zip.cpp                                                  */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  file_access_zip.cpp                                                   */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
 #ifdef MINIZIP_ENABLED
 
@@ -34,87 +34,87 @@
 
 #include "core/io/file_access.h"
 
-ZipArchive *ZipArchive::instance = nullptr;
-
 extern "C" {
 
-static void *godot_open(void *data, const char *p_fname, int mode) {
-	if (mode & ZLIB_FILEFUNC_MODE_WRITE) {
+struct ZipData {
+	Ref<FileAccess> f;
+};
+
+static void *godot_open(voidpf p_opaque, const char *p_fname, int p_mode) {
+	if (p_mode & ZLIB_FILEFUNC_MODE_WRITE) {
 		return nullptr;
 	}
 
-	FileAccess *f = FileAccess::open(p_fname, FileAccess::READ);
-	ERR_FAIL_COND_V(!f, nullptr);
+	Ref<FileAccess> f = FileAccess::open(String::utf8(p_fname), FileAccess::READ);
+	ERR_FAIL_COND_V(f.is_null(), nullptr);
 
-	return f;
+	ZipData *zd = memnew(ZipData);
+	zd->f = f;
+	return zd;
 }
 
-static uLong godot_read(void *data, void *fdata, void *buf, uLong size) {
-	FileAccess *f = (FileAccess *)fdata;
-	f->get_buffer((uint8_t *)buf, size);
-	return size;
+static uLong godot_read(voidpf p_opaque, voidpf p_stream, void *r_buf, uLong p_size) {
+	ZipData *zd = (ZipData *)p_stream;
+	zd->f->get_buffer((uint8_t *)r_buf, p_size);
+	return p_size;
 }
 
-static uLong godot_write(voidpf opaque, voidpf stream, const void *buf, uLong size) {
+static uLong godot_write(voidpf p_opaque, voidpf p_stream, const void *p_buf, uLong p_size) {
 	return 0;
 }
 
-static long godot_tell(voidpf opaque, voidpf stream) {
-	FileAccess *f = (FileAccess *)stream;
-	return f->get_position();
+static long godot_tell(voidpf p_opaque, voidpf p_stream) {
+	ZipData *zd = (ZipData *)p_stream;
+	return zd->f->get_position();
 }
 
-static long godot_seek(voidpf opaque, voidpf stream, uLong offset, int origin) {
-	FileAccess *f = (FileAccess *)stream;
+static long godot_seek(voidpf p_opaque, voidpf p_stream, uLong p_offset, int p_origin) {
+	ZipData *zd = (ZipData *)p_stream;
 
-	uint64_t pos = offset;
-	switch (origin) {
+	uint64_t pos = p_offset;
+	switch (p_origin) {
 		case ZLIB_FILEFUNC_SEEK_CUR:
-			pos = f->get_position() + offset;
+			pos = zd->f->get_position() + p_offset;
 			break;
 		case ZLIB_FILEFUNC_SEEK_END:
-			pos = f->get_length() + offset;
+			pos = zd->f->get_length() + p_offset;
 			break;
 		default:
 			break;
 	}
 
-	f->seek(pos);
+	zd->f->seek(pos);
 	return 0;
 }
 
-static int godot_close(voidpf opaque, voidpf stream) {
-	FileAccess *f = (FileAccess *)stream;
-	if (f) {
-		f->close();
-		memdelete(f);
-		f = nullptr;
-	}
+static int godot_close(voidpf p_opaque, voidpf p_stream) {
+	ZipData *zd = (ZipData *)p_stream;
+	memdelete(zd);
 	return 0;
 }
 
-static int godot_testerror(voidpf opaque, voidpf stream) {
-	FileAccess *f = (FileAccess *)stream;
-	return f->get_error() != OK ? 1 : 0;
+static int godot_testerror(voidpf p_opaque, voidpf p_stream) {
+	ZipData *zd = (ZipData *)p_stream;
+	return zd->f->get_error() != OK ? 1 : 0;
 }
 
-static voidpf godot_alloc(voidpf opaque, uInt items, uInt size) {
-	return memalloc((size_t)items * size);
+static voidpf godot_alloc(voidpf p_opaque, uInt p_items, uInt p_size) {
+	return memalloc((size_t)p_items * p_size);
 }
 
-static void godot_free(voidpf opaque, voidpf address) {
-	memfree(address);
+static void godot_free(voidpf p_opaque, voidpf r_address) {
+	memfree(r_address);
 }
 } // extern "C"
 
 void ZipArchive::close_handle(unzFile p_file) const {
-	ERR_FAIL_COND_MSG(!p_file, "Cannot close a file if none is open.");
+	ERR_FAIL_NULL_MSG(p_file, "Cannot close a file if none is open.");
 	unzCloseCurrentFile(p_file);
 	unzClose(p_file);
 }
 
-unzFile ZipArchive::get_file_handle(String p_file) const {
-	ERR_FAIL_COND_V_MSG(!file_exists(p_file), nullptr, "File '" + p_file + " doesn't exist.");
+unzFile ZipArchive::get_file_handle(const String &p_file) const {
+	ERR_FAIL_COND_V_MSG(!file_exists(p_file), nullptr, vformat("File '%s' doesn't exist.", p_file));
 	File file = files[p_file];
 
 	zlib_filefunc_def io;
@@ -134,7 +134,7 @@ unzFile ZipArchive::get_file_handle(String p_file) const {
 	io.free_mem = godot_free;
 
 	unzFile pkg = unzOpen2(packages[file.package].filename.utf8().get_data(), &io);
-	ERR_FAIL_COND_V_MSG(!pkg, nullptr, "Cannot open file '" + packages[file.package].filename + "'.");
+	ERR_FAIL_NULL_V_MSG(pkg, nullptr, vformat("Cannot open file '%s'.", packages[file.package].filename));
 	int unz_err = unzGoToFilePos(pkg, &file.file_pos);
 	if (unz_err != UNZ_OK || unzOpenCurrentFile(pkg) != UNZ_OK) {
 		unzClose(pkg);
@@ -144,7 +144,7 @@ unzFile ZipArchive::get_file_handle(String p_file) const {
 	return pkg;
 }
 
-bool ZipArchive::try_open_pack(const String &p_path, bool p_replace_files, uint64_t p_offset = 0) {
+bool ZipArchive::try_open_pack(const String &p_path, bool p_replace_files, uint64_t p_offset, const Vector<uint8_t> &p_decryption_key) {
 	// load with offset feature only supported for PCK files
 	ERR_FAIL_COND_V_MSG(p_offset != 0, false, "Invalid PCK data. Note that loading files with a non-zero offset isn't supported with ZIP archives.");
 
@@ -166,7 +166,7 @@ bool ZipArchive::try_open_pack(const String &p_path, bool p_replace_files, uint6
 	io.zerror_file = godot_testerror;
 
 	unzFile zfile = unzOpen2(p_path.utf8().get_data(), &io);
-	ERR_FAIL_COND_V(!zfile, false);
+	ERR_FAIL_NULL_V(zfile, false);
 
 	unz_global_info64 gi;
 	int err = unzGetGlobalInfo64(zfile, &gi);
@@ -174,7 +174,6 @@ bool ZipArchive::try_open_pack(const String &p_path, bool p_replace_files, uint6
 
 	Package pkg;
 	pkg.filename = p_path;
-	pkg.zfile = zfile;
 	packages.push_back(pkg);
 	int pkg_num = packages.size() - 1;
 
@@ -189,7 +188,7 @@ bool ZipArchive::try_open_pack(const String &p_path, bool p_replace_files, uint6
 		f.package = pkg_num;
 		unzGetFilePos(zfile, &f.file_pos);
 
-		String fname = String("res://") + filename_inzip;
+		String fname = String("res://") + String::utf8(filename_inzip);
 		files[fname] = f;
 
 		uint8_t md5[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
@@ -201,14 +200,16 @@ bool ZipArchive::try_open_pack(const String &p_path, bool p_replace_files, uint6
 		}
 	}
 
+	unzClose(zfile);
+
 	return true;
 }
 
-bool ZipArchive::file_exists(String p_name) const {
+bool ZipArchive::file_exists(const String &p_name) const {
 	return files.has(p_name);
 }
 
-FileAccess *ZipArchive::get_file(const String &p_path, PackedData::PackedFile *p_file) {
+Ref<FileAccess> ZipArchive::get_file(const String &p_path, PackedData::PackedFile *p_file, const Vector<uint8_t> &p_decryption_key) {
 	return memnew(FileAccessZip(p_path, *p_file));
 }
 
@@ -225,21 +226,17 @@ ZipArchive::ZipArchive() {
 }
 
 ZipArchive::~ZipArchive() {
-	for (int i = 0; i < packages.size(); i++) {
-		unzClose(packages[i].zfile);
-	}
-
 	packages.clear();
 }
 
-Error FileAccessZip::_open(const String &p_path, int p_mode_flags) {
-	close();
+Error FileAccessZip::open_internal(const String &p_path, int p_mode_flags) {
+	_close();
 
 	ERR_FAIL_COND_V(p_mode_flags & FileAccess::WRITE, FAILED);
 	ZipArchive *arch = ZipArchive::get_singleton();
-	ERR_FAIL_COND_V(!arch, FAILED);
+	ERR_FAIL_NULL_V(arch, FAILED);
 	zfile = arch->get_file_handle(p_path);
-	ERR_FAIL_COND_V(!zfile, FAILED);
+	ERR_FAIL_NULL_V(zfile, FAILED);
 
 	int err = unzGetCurrentFileInfo64(zfile, &file_info, nullptr, 0, nullptr, 0, nullptr, 0);
 	ERR_FAIL_COND_V(err != UNZ_OK, FAILED);
@@ -247,13 +244,13 @@ Error FileAccessZip::_open(const String &p_path, int p_mode_flags) {
 	return OK;
 }
 
-void FileAccessZip::close() {
+void FileAccessZip::_close() {
 	if (!zfile) {
 		return;
 	}
 
 	ZipArchive *arch = ZipArchive::get_singleton();
-	ERR_FAIL_COND(!arch);
+	ERR_FAIL_NULL(arch);
 	arch->close_handle(zfile);
 	zfile = nullptr;
 }
@@ -263,41 +260,35 @@ bool FileAccessZip::is_open() const {
 }
 
 void FileAccessZip::seek(uint64_t p_position) {
-	ERR_FAIL_COND(!zfile);
+	ERR_FAIL_NULL(zfile);
 
 	unzSeekCurrentFile(zfile, p_position);
 }
 
 void FileAccessZip::seek_end(int64_t p_position) {
-	ERR_FAIL_COND(!zfile);
+	ERR_FAIL_NULL(zfile);
 	unzSeekCurrentFile(zfile, get_length() + p_position);
 }
 
 uint64_t FileAccessZip::get_position() const {
-	ERR_FAIL_COND_V(!zfile, 0);
-	return unztell(zfile);
+	ERR_FAIL_NULL_V(zfile, 0);
+	return unztell64(zfile);
 }
 
 uint64_t FileAccessZip::get_length() const {
-	ERR_FAIL_COND_V(!zfile, 0);
+	ERR_FAIL_NULL_V(zfile, 0);
 	return file_info.uncompressed_size;
 }
 
 bool FileAccessZip::eof_reached() const {
-	ERR_FAIL_COND_V(!zfile, true);
+	ERR_FAIL_NULL_V(zfile, true);
 
 	return at_eof;
 }
 
-uint8_t FileAccessZip::get_8() const {
-	uint8_t ret = 0;
-	get_buffer(&ret, 1);
-	return ret;
-}
-
 uint64_t FileAccessZip::get_buffer(uint8_t *p_dst, uint64_t p_length) const {
 	ERR_FAIL_COND_V(!p_dst && p_length > 0, -1);
-	ERR_FAIL_COND_V(!zfile, -1);
+	ERR_FAIL_NULL_V(zfile, -1);
 
 	at_eof = unzeof(zfile);
 	if (at_eof) {
@@ -326,20 +317,24 @@ void FileAccessZip::flush() {
 	ERR_FAIL();
 }
 
-void FileAccessZip::store_8(uint8_t p_dest) {
-	ERR_FAIL();
+bool FileAccessZip::store_buffer(const uint8_t *p_src, uint64_t p_length) {
+	ERR_FAIL_V(false);
 }
 
 bool FileAccessZip::file_exists(const String &p_name) {
 	return false;
 }
 
+void FileAccessZip::close() {
+	_close();
+}
+
 FileAccessZip::FileAccessZip(const String &p_path, const PackedData::PackedFile &p_file) {
-	_open(p_path, FileAccess::READ);
+	open_internal(p_path, FileAccess::READ);
 }
 
 FileAccessZip::~FileAccessZip() {
-	close();
+	_close();
 }
 
 #endif // MINIZIP_ENABLED

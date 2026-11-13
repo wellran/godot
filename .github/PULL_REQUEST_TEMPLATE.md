@@ -1,11 +1,18 @@
 <!--
-Pull requests should always be made for the `master` branch first, as that's
-where development happens and the source of all future stable release branches.
+Please target the `master` branch. We will take care of backporting relevant fixes to older versions.
 
-Relevant fixes are cherry-picked for stable branches as needed.
+Before submitting, please read our checklist for contributors:
+https://contributing.godotengine.org/en/latest/development/engine/introduction.html#checklist-for-new-contributors
 
-Do not create a pull request for stable branches unless the change is already
-available in the `master` branch and it cannot be easily cherry-picked.
-Alternatively, if the change is only relevant for that branch (e.g. rendering
-fixes for the 3.2 branch).
+Use of AI must be disclosed and should include a description of how it was used.
+-->
+
+## What problem(s) does this PR solve?
+
+- Closes #
+
+## Additional information
+
+<!--
+Provide additional information and explanation of your PR, including areas that you are uncertain of or require special attention from reviewers. For examples, please read our pull request guidelines: https://contributing.godotengine.org/en/latest/development/contribution_rules.html#explain-your-contributions
 -->

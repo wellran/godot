@@ -25,10 +25,8 @@
 U_NAMESPACE_BEGIN
 
 // Forward declaration:
-namespace number {
-namespace impl {
+namespace number::impl {
 class SimpleModifier;
-}
 }
 
 /**
@@ -59,13 +57,13 @@ class SimpleModifier;
  * @see UMessagePatternApostropheMode
  * @stable ICU 57
  */
-class U_COMMON_API SimpleFormatter U_FINAL : public UMemory {
+class U_COMMON_API SimpleFormatter final : public UMemory {
 public:
     /**
      * Default constructor.
      * @stable ICU 57
      */
-    SimpleFormatter() : compiledPattern((char16_t)0) {}
+    SimpleFormatter() : compiledPattern(static_cast<char16_t>(0)) {}
 
     /**
      * Constructs a formatter from the pattern string.
@@ -110,7 +108,7 @@ public:
      * Assignment operator.
      * @stable ICU 57
      */
-    SimpleFormatter &operator=(const SimpleFormatter& other);
+    SimpleFormatter& operator=(const SimpleFormatter& other) U_LIFETIME_BOUND;
 
     /**
      * Destructor.
@@ -170,9 +168,10 @@ public:
      * @return appendTo
      * @stable ICU 57
      */
-    UnicodeString &format(
-            const UnicodeString &value0,
-            UnicodeString &appendTo, UErrorCode &errorCode) const;
+    UnicodeString& format(
+            const UnicodeString& value0,
+            UnicodeString& appendTo U_LIFETIME_BOUND,
+            UErrorCode& errorCode) const;
 
     /**
      * Formats the given values, appending to the appendTo builder.
@@ -187,10 +186,11 @@ public:
      * @return appendTo
      * @stable ICU 57
      */
-    UnicodeString &format(
-            const UnicodeString &value0,
-            const UnicodeString &value1,
-            UnicodeString &appendTo, UErrorCode &errorCode) const;
+    UnicodeString& format(
+            const UnicodeString& value0,
+            const UnicodeString& value1,
+            UnicodeString& appendTo U_LIFETIME_BOUND,
+            UErrorCode& errorCode) const;
 
     /**
      * Formats the given values, appending to the appendTo builder.
@@ -206,24 +206,25 @@ public:
      * @return appendTo
      * @stable ICU 57
      */
-    UnicodeString &format(
-            const UnicodeString &value0,
-            const UnicodeString &value1,
-            const UnicodeString &value2,
-            UnicodeString &appendTo, UErrorCode &errorCode) const;
+    UnicodeString& format(
+            const UnicodeString& value0,
+            const UnicodeString& value1,
+            const UnicodeString& value2,
+            UnicodeString& appendTo U_LIFETIME_BOUND,
+            UErrorCode& errorCode) const;
 
     /**
      * Formats the given values, appending to the appendTo string.
      *
      * @param values The argument values.
      *               An argument value must not be the same object as appendTo.
-     *               Can be NULL if valuesLength==getArgumentLimit()==0.
+     *               Can be nullptr if valuesLength==getArgumentLimit()==0.
      * @param valuesLength The length of the values array.
      *                     Must be at least getArgumentLimit().
      * @param appendTo Gets the formatted pattern and values appended.
      * @param offsets offsets[i] receives the offset of where
      *                values[i] replaced pattern argument {i}.
-     *                Can be shorter or longer than values. Can be NULL if offsetsLength==0.
+     *                Can be shorter or longer than values. Can be nullptr if offsetsLength==0.
      *                If there is no {i} in the pattern, then offsets[i] is set to -1.
      * @param offsetsLength The length of the offsets array.
      * @param errorCode ICU error code in/out parameter.
@@ -231,10 +232,13 @@ public:
      * @return appendTo
      * @stable ICU 57
      */
-    UnicodeString &formatAndAppend(
-            const UnicodeString *const *values, int32_t valuesLength,
-            UnicodeString &appendTo,
-            int32_t *offsets, int32_t offsetsLength, UErrorCode &errorCode) const;
+    UnicodeString& formatAndAppend(
+            const UnicodeString* const* values,
+            int32_t valuesLength,
+            UnicodeString& appendTo U_LIFETIME_BOUND,
+            int32_t* offsets,
+            int32_t offsetsLength,
+            UErrorCode& errorCode) const;
 
     /**
      * Formats the given values, replacing the contents of the result string.
@@ -243,13 +247,13 @@ public:
      *
      * @param values The argument values.
      *               An argument value may be the same object as result.
-     *               Can be NULL if valuesLength==getArgumentLimit()==0.
+     *               Can be nullptr if valuesLength==getArgumentLimit()==0.
      * @param valuesLength The length of the values array.
      *                     Must be at least getArgumentLimit().
      * @param result Gets its contents replaced by the formatted pattern and values.
      * @param offsets offsets[i] receives the offset of where
      *                values[i] replaced pattern argument {i}.
-     *                Can be shorter or longer than values. Can be NULL if offsetsLength==0.
+     *                Can be shorter or longer than values. Can be nullptr if offsetsLength==0.
      *                If there is no {i} in the pattern, then offsets[i] is set to -1.
      * @param offsetsLength The length of the offsets array.
      * @param errorCode ICU error code in/out parameter.
@@ -257,10 +261,13 @@ public:
      * @return result
      * @stable ICU 57
      */
-    UnicodeString &formatAndReplace(
-            const UnicodeString *const *values, int32_t valuesLength,
-            UnicodeString &result,
-            int32_t *offsets, int32_t offsetsLength, UErrorCode &errorCode) const;
+    UnicodeString& formatAndReplace(
+            const UnicodeString* const* values,
+            int32_t valuesLength,
+            UnicodeString& result U_LIFETIME_BOUND,
+            int32_t* offsets,
+            int32_t offsetsLength,
+            UErrorCode& errorCode) const;
 
     /**
      * Returns the pattern text with none of the arguments.
@@ -323,12 +330,16 @@ private:
         int32_t *offsets,
         int32_t offsetsLength);
 
-    static UnicodeString &format(
-            const char16_t *compiledPattern, int32_t compiledPatternLength,
-            const UnicodeString *const *values,
-            UnicodeString &result, const UnicodeString *resultCopy, UBool forbidResultAsValue,
-            int32_t *offsets, int32_t offsetsLength,
-            UErrorCode &errorCode);
+    static UnicodeString& format(
+            const char16_t* compiledPattern,
+            int32_t compiledPatternLength,
+            const UnicodeString* const* values,
+            UnicodeString& result U_LIFETIME_BOUND,
+            const UnicodeString* resultCopy,
+            UBool forbidResultAsValue,
+            int32_t* offsets,
+            int32_t offsetsLength,
+            UErrorCode& errorCode);
 
     // Give access to internals to SimpleModifier for number formatting
     friend class number::impl::SimpleModifier;

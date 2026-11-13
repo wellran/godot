@@ -133,8 +133,8 @@ public:
      * @return the hash code.
      * @stable ICU 2.0
      */
-    virtual int32_t hashCode(void) const = 0;
-    
+    virtual int32_t hashCode() const = 0;
+
     /**
      * Returns a UClassID for this ForwardCharacterIterator ("poor man's
      * RTTI").<P> Despite the fact that this function is public,
@@ -142,8 +142,8 @@ public:
      * @return a UClassID for this ForwardCharacterIterator 
      * @stable ICU 2.0
      */
-    virtual UClassID getDynamicClassID(void) const override = 0;
-    
+    virtual UClassID getDynamicClassID() const override = 0;
+
     /**
      * Gets the current code unit for returning and advances to the next code unit
      * in the iteration range
@@ -152,8 +152,8 @@ public:
      * @return the current code unit.
      * @stable ICU 2.0
      */
-    virtual char16_t         nextPostInc(void) = 0;
-    
+    virtual char16_t nextPostInc() = 0;
+
     /**
      * Gets the current code point for returning and advances to the next code point
      * in the iteration range
@@ -162,8 +162,8 @@ public:
      * @return the current code point.
      * @stable ICU 2.0
      */
-    virtual UChar32       next32PostInc(void) = 0;
-    
+    virtual UChar32 next32PostInc() = 0;
+
     /**
      * Returns false if there are no more code units or code points
      * at or after the current position in the iteration range.
@@ -186,7 +186,9 @@ protected:
      * Assignment operator to be overridden in the implementing class.
      * @stable ICU 2.0
      */
-    ForwardCharacterIterator &operator=(const ForwardCharacterIterator&) { return *this; }
+    ForwardCharacterIterator& operator=(const ForwardCharacterIterator&) U_LIFETIME_BOUND {
+        return *this;
+    }
 };
 
 /**
@@ -297,7 +299,7 @@ protected:
  * \code
  *  void traverseForward(CharacterIterator& iter)
  *  {
- *      for(char16_t c = iter.first(); c != CharacterIterator.DONE; c = iter.next()) {
+ *      for(char16_t c = iter.first(); c != CharacterIterator::DONE; c = iter.next()) {
  *          processChar(c);
  *      }
  *  }
@@ -308,7 +310,7 @@ protected:
  * \code
  *  void traverseBackward(CharacterIterator& iter)
  *  {
- *      for(char16_t c = iter.last(); c != CharacterIterator.DONE; c = iter.previous()) {
+ *      for(char16_t c = iter.last(); c != CharacterIterator::DONE; c = iter.previous()) {
  *          processChar(c);
  *      }
  *  }
@@ -322,11 +324,11 @@ protected:
  * {
  *      char16_t c;
  *      for (c = iter.setIndex(pos);
- *      c != CharacterIterator.DONE && (Unicode::isLetter(c) || Unicode::isDigit(c));
+ *      c != CharacterIterator::DONE && (Unicode::isLetter(c) || Unicode::isDigit(c));
  *          c = iter.next()) {}
  *      int32_t end = iter.getIndex();
  *      for (c = iter.setIndex(pos);
- *          c != CharacterIterator.DONE && (Unicode::isLetter(c) || Unicode::isDigit(c));
+ *          c != CharacterIterator::DONE && (Unicode::isLetter(c) || Unicode::isDigit(c));
  *          c = iter.previous()) {}
  *      int32_t start = iter.getIndex() + 1;
  *  
@@ -389,7 +391,7 @@ public:
      * @return the first code unit in its iteration range.
      * @stable ICU 2.0
      */
-    virtual char16_t         first(void) = 0;
+    virtual char16_t first() = 0;
 
     /**
      * Sets the iterator to refer to the first code unit in its
@@ -399,7 +401,7 @@ public:
      * @return the first code unit in its iteration range.
      * @stable ICU 2.0
      */
-    virtual char16_t         firstPostInc(void);
+    virtual char16_t firstPostInc();
 
     /**
      * Sets the iterator to refer to the first code point in its
@@ -410,7 +412,7 @@ public:
      * @return the first code point in its iteration range.
      * @stable ICU 2.0
      */
-    virtual UChar32       first32(void) = 0;
+    virtual UChar32 first32() = 0;
 
     /**
      * Sets the iterator to refer to the first code point in its
@@ -420,7 +422,7 @@ public:
      * @return the first code point in its iteration range.
      * @stable ICU 2.0
      */
-    virtual UChar32       first32PostInc(void);
+    virtual UChar32 first32PostInc();
 
     /**
      * Sets the iterator to refer to the first code unit or code point in its
@@ -438,8 +440,8 @@ public:
      * @return the last code unit.
      * @stable ICU 2.0
      */
-    virtual char16_t         last(void) = 0;
-        
+    virtual char16_t last() = 0;
+
     /**
      * Sets the iterator to refer to the last code point in its
      * iteration range, and returns that code unit.
@@ -447,7 +449,7 @@ public:
      * @return the last code point.
      * @stable ICU 2.0
      */
-    virtual UChar32       last32(void) = 0;
+    virtual UChar32 last32() = 0;
 
     /**
      * Sets the iterator to the end of its iteration range, just behind
@@ -486,15 +488,15 @@ public:
      * @return the current code unit. 
      * @stable ICU 2.0
      */
-    virtual char16_t         current(void) const = 0;
-        
+    virtual char16_t current() const = 0;
+
     /**
      * Returns the code point the iterator currently refers to.  
      * @return the current code point.
      * @stable ICU 2.0
      */
-    virtual UChar32       current32(void) const = 0;
-        
+    virtual UChar32 current32() const = 0;
+
     /**
      * Advances to the next code unit in the iteration range
      * (toward endIndex()), and returns that code unit.  If there are
@@ -502,8 +504,8 @@ public:
      * @return the next code unit.
      * @stable ICU 2.0
      */
-    virtual char16_t         next(void) = 0;
-        
+    virtual char16_t next() = 0;
+
     /**
      * Advances to the next code point in the iteration range
      * (toward endIndex()), and returns that code point.  If there are
@@ -514,8 +516,8 @@ public:
      * @return the next code point.
      * @stable ICU 2.0
      */
-    virtual UChar32       next32(void) = 0;
-        
+    virtual UChar32 next32() = 0;
+
     /**
      * Advances to the previous code unit in the iteration range
      * (toward startIndex()), and returns that code unit.  If there are
@@ -523,7 +525,7 @@ public:
      * @return the previous code unit.
      * @stable ICU 2.0
      */
-    virtual char16_t         previous(void) = 0;
+    virtual char16_t previous() = 0;
 
     /**
      * Advances to the previous code point in the iteration range
@@ -532,7 +534,7 @@ public:
      * @return the previous code point. 
      * @stable ICU 2.0
      */
-    virtual UChar32       previous32(void) = 0;
+    virtual UChar32 previous32() = 0;
 
     /**
      * Returns false if there are no more code units or code points
@@ -555,8 +557,8 @@ public:
      * object of the character returned by first().
      * @stable ICU 2.0
      */
-    inline int32_t       startIndex(void) const;
-        
+    inline int32_t startIndex() const;
+
     /**
      * Returns the numeric index in the underlying text-storage
      * object of the position immediately BEYOND the character
@@ -566,8 +568,8 @@ public:
      * returned by last().
      * @stable ICU 2.0
      */
-    inline int32_t       endIndex(void) const;
-        
+    inline int32_t endIndex() const;
+
     /**
      * Returns the numeric index in the underlying text-storage
      * object of the character the iterator currently refers to
@@ -576,7 +578,7 @@ public:
      * the character the iterator currently refers to
      * @stable ICU 2.0
      */
-    inline int32_t       getIndex(void) const;
+    inline int32_t getIndex() const;
 
     /**
      * Returns the length of the entire text in the underlying
@@ -664,7 +666,7 @@ protected:
      * @return the newly set CharacterIterator.
      * @stable ICU 2.0
      */
-    CharacterIterator &operator=(const CharacterIterator &that);
+    CharacterIterator& operator=(const CharacterIterator& that) U_LIFETIME_BOUND;
 
     /**
      * Base class text length field.
@@ -708,22 +710,22 @@ CharacterIterator::setToEnd() {
 }
 
 inline int32_t
-CharacterIterator::startIndex(void) const {
+CharacterIterator::startIndex() const {
     return begin;
 }
 
 inline int32_t
-CharacterIterator::endIndex(void) const {
+CharacterIterator::endIndex() const {
     return end;
 }
 
 inline int32_t
-CharacterIterator::getIndex(void) const {
+CharacterIterator::getIndex() const {
     return pos;
 }
 
 inline int32_t
-CharacterIterator::getLength(void) const {
+CharacterIterator::getLength() const {
     return textLength;
 }
 

@@ -64,7 +64,7 @@ class UnicodeString;
  * @author M. Davis
  * @stable ICU 2.4
  */
-class U_COMMON_API UnicodeSetIterator U_FINAL : public UObject {
+class U_COMMON_API UnicodeSetIterator final : public UObject {
     /**
      * Value of <tt>codepoint</tt> if the iterator points to a string.
      * If <tt>codepoint == IS_STRING</tt>, then examine
@@ -103,7 +103,7 @@ class U_COMMON_API UnicodeSetIterator U_FINAL : public UObject {
      * @param set set to iterate over
      * @stable ICU 2.4
      */
-    UnicodeSetIterator(const UnicodeSet& set);
+    UnicodeSetIterator(const UnicodeSet& set U_LIFETIME_BOUND);
 
     /**
      * Create an iterator over nothing.  <tt>next()</tt> and
@@ -162,26 +162,24 @@ class U_COMMON_API UnicodeSetIterator U_FINAL : public UObject {
      * 
      * @stable ICU 2.4
      */
-    const UnicodeString& getString();
+    const UnicodeString& getString() U_LIFETIME_BOUND;
 
-#ifndef U_HIDE_DRAFT_API
     /**
      * Skips over the remaining code points/ranges, if any.
      * A following call to next() or nextRange() will yield a string, if there is one.
      * No-op if next() would return false, or if it would yield a string anyway.
      *
      * @return *this
-     * @draft ICU 70
+     * @stable ICU 70
      * @see UnicodeSet#strings()
      */
-    inline UnicodeSetIterator &skipToStrings() {
+    inline UnicodeSetIterator& skipToStrings() U_LIFETIME_BOUND {
         // Finish code point/range iteration.
         range = endRange;
         endElement = -1;
         nextElement = 0;
         return *this;
     }
-#endif  // U_HIDE_DRAFT_API
 
     /**
      * Advances the iteration position to the next element in the set, 

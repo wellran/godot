@@ -1,75 +1,68 @@
-/*************************************************************************/
-/*  class_db_api_json.cpp                                                */
-/*************************************************************************/
-/*                       This file is part of:                           */
-/*                           GODOT ENGINE                                */
-/*                      https://godotengine.org                          */
-/*************************************************************************/
-/* Copyright (c) 2007-2021 Juan Linietsky, Ariel Manzur.                 */
-/* Copyright (c) 2014-2021 Godot Engine contributors (cf. AUTHORS.md).   */
-/*                                                                       */
-/* Permission is hereby granted, free of charge, to any person obtaining */
-/* a copy of this software and associated documentation files (the       */
-/* "Software"), to deal in the Software without restriction, including   */
-/* without limitation the rights to use, copy, modify, merge, publish,   */
-/* distribute, sublicense, and/or sell copies of the Software, and to    */
-/* permit persons to whom the Software is furnished to do so, subject to */
-/* the following conditions:                                             */
-/*                                                                       */
-/* The above copyright notice and this permission notice shall be        */
-/* included in all copies or substantial portions of the Software.       */
-/*                                                                       */
-/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,       */
-/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF    */
-/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.*/
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY  */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,  */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE     */
-/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                */
-/*************************************************************************/
+/**************************************************************************/
+/*  class_db_api_json.cpp                                                 */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
 
 #include "class_db_api_json.h"
 
-#ifdef DEBUG_METHODS_ENABLED
+#ifdef DEBUG_ENABLED
 
 #include "core/config/project_settings.h"
 #include "core/io/file_access.h"
 #include "core/io/json.h"
-#include "core/version.h"
 
 void class_db_api_to_json(const String &p_output_file, ClassDB::APIType p_api) {
 	Dictionary classes_dict;
 
-	List<StringName> names;
+	LocalVector<StringName> class_list;
+	ClassDB::get_class_list(class_list);
 
-	const StringName *k = nullptr;
-
-	while ((k = ClassDB::classes.next(k))) {
-		names.push_back(*k);
-	}
-	//must be alphabetically sorted for hash to compute
-	names.sort_custom<StringName::AlphCompare>();
-
-	for (const StringName &E : names) {
-		ClassDB::ClassInfo *t = ClassDB::classes.getptr(E);
-		ERR_FAIL_COND(!t);
+	for (const StringName &class_name : class_list) {
+		ClassDB::ClassInfo *t = ClassDB::classes.getptr(class_name);
+		ERR_FAIL_NULL(t);
 		if (t->api != p_api || !t->exposed) {
 			continue;
 		}
 
 		Dictionary class_dict;
-		classes_dict[t->name] = class_dict;
+		classes_dict[t->gdtype->get_name()] = class_dict;
 
-		class_dict["inherits"] = t->inherits;
+		class_dict["inherits"] = t->gdtype->get_super_type_name();
 
 		{ //methods
 
 			List<StringName> snames;
 
-			k = nullptr;
-
-			while ((k = t->method_map.next(k))) {
-				String name = k->operator String();
+			for (const KeyValue<StringName, GDType::Member> &F : t->gdtype->members(true)) {
+				if (F.value.type != GDType::Member::Type::METHOD) {
+					continue;
+				}
+				String name = F.key.string();
 
 				ERR_CONTINUE(name.is_empty());
 
@@ -77,7 +70,7 @@ void class_db_api_to_json(const String &p_output_file, ClassDB::APIType p_api) {
 					continue; // Ignore non-virtual methods that start with an underscore
 				}
 
-				snames.push_back(*k);
+				snames.push_back(F.key);
 			}
 
 			snames.sort_custom<StringName::AlphCompare>();
@@ -88,7 +81,7 @@ void class_db_api_to_json(const String &p_output_file, ClassDB::APIType p_api) {
 				Dictionary method_dict;
 				methods.push_back(method_dict);
 
-				MethodBind *mb = t->method_map[F];
+				const MethodBind *mb = t->gdtype->members(true)[F].payload.method;
 				method_dict["name"] = mb->get_name();
 				method_dict["argument_count"] = mb->get_argument_count();
 				method_dict["return_type"] = mb->get_argument_type(-1);
@@ -131,10 +124,11 @@ void class_db_api_to_json(const String &p_output_file, ClassDB::APIType p_api) {
 
 			List<StringName> snames;
 
-			k = nullptr;
-
-			while ((k = t->constant_map.next(k))) {
-				snames.push_back(*k);
+			for (const KeyValue<StringName, GDType::Member> &F : t->gdtype->members(true)) {
+				if (F.value.type != GDType::Member::Type::INTEGER_CONSTANT) {
+					continue;
+				}
+				snames.push_back(F.key);
 			}
 
 			snames.sort_custom<StringName::AlphCompare>();
@@ -146,7 +140,7 @@ void class_db_api_to_json(const String &p_output_file, ClassDB::APIType p_api) {
 				constants.push_back(constant_dict);
 
 				constant_dict["name"] = F;
-				constant_dict["value"] = t->constant_map[F];
+				constant_dict["value"] = t->gdtype->members(true)[F].payload.integer_constant.value;
 			}
 
 			if (!constants.is_empty()) {
@@ -158,10 +152,11 @@ void class_db_api_to_json(const String &p_output_file, ClassDB::APIType p_api) {
 
 			List<StringName> snames;
 
-			k = nullptr;
-
-			while ((k = t->signal_map.next(k))) {
-				snames.push_back(*k);
+			for (const KeyValue<StringName, GDType::Member> &F : t->gdtype->members(true)) {
+				if (F.value.type != GDType::Member::Type::SIGNAL) {
+					continue;
+				}
+				snames.push_back(F.key);
 			}
 
 			snames.sort_custom<StringName::AlphCompare>();
@@ -172,15 +167,15 @@ void class_db_api_to_json(const String &p_output_file, ClassDB::APIType p_api) {
 				Dictionary signal_dict;
 				signals.push_back(signal_dict);
 
-				MethodInfo &mi = t->signal_map[F];
+				const MethodInfo &mi = *t->gdtype->members(true)[F].payload.signal;
 				signal_dict["name"] = F;
 
 				Array arguments;
 				signal_dict["arguments"] = arguments;
-				for (int i = 0; i < mi.arguments.size(); i++) {
+				for (const PropertyInfo &pi : mi.arguments) {
 					Dictionary argument_dict;
 					arguments.push_back(argument_dict);
-					argument_dict["type"] = mi.arguments[i].type;
+					argument_dict["type"] = pi.type;
 				}
 			}
 
@@ -193,12 +188,11 @@ void class_db_api_to_json(const String &p_output_file, ClassDB::APIType p_api) {
 
 			List<StringName> snames;
 
-			k = nullptr;
-
-			while ((k = t->property_setget.next(k))) {
-				snames.push_back(*k);
+			for (const KeyValue<StringName, GDType::Member> &kv : t->gdtype->members(true)) {
+				if (kv.value.type == GDType::Member::Type::PROPERTY) {
+					snames.push_back(kv.key);
+				}
 			}
-
 			snames.sort_custom<StringName::AlphCompare>();
 
 			Array properties;
@@ -207,11 +201,12 @@ void class_db_api_to_json(const String &p_output_file, ClassDB::APIType p_api) {
 				Dictionary property_dict;
 				properties.push_back(property_dict);
 
-				ClassDB::PropertySetGet *psg = t->property_setget.getptr(F);
+				const GDType::Member &property = t->gdtype->members(true)[F];
+				const GDType::Member::Property &psg = property.payload.property;
 
 				property_dict["name"] = F;
-				property_dict["setter"] = psg->setter;
-				property_dict["getter"] = psg->getter;
+				property_dict["setter"] = psg.setter ? psg.setter->get_name() : StringName();
+				property_dict["getter"] = psg.getter ? psg.getter->get_name() : StringName();
 			}
 
 			if (!properties.is_empty()) {
@@ -222,15 +217,15 @@ void class_db_api_to_json(const String &p_output_file, ClassDB::APIType p_api) {
 		Array property_list;
 
 		//property list
-		for (const PropertyInfo &F : t->property_list) {
+		for (const PropertyInfo *F : t->gdtype->get_ordered_self_properties()) {
 			Dictionary property_dict;
 			property_list.push_back(property_dict);
 
-			property_dict["name"] = F.name;
-			property_dict["type"] = F.type;
-			property_dict["hint"] = F.hint;
-			property_dict["hint_string"] = F.hint_string;
-			property_dict["usage"] = F.usage;
+			property_dict["name"] = F->name;
+			property_dict["type"] = F->type;
+			property_dict["hint"] = F->hint;
+			property_dict["hint_string"] = F->hint_string;
+			property_dict["usage"] = F->usage;
 		}
 
 		if (!property_list.is_empty()) {
@@ -238,13 +233,11 @@ void class_db_api_to_json(const String &p_output_file, ClassDB::APIType p_api) {
 		}
 	}
 
-	FileAccessRef f = FileAccess::open(p_output_file, FileAccess::WRITE);
-	ERR_FAIL_COND_MSG(!f, "Cannot open file '" + p_output_file + "'.");
-	JSON json;
-	f->store_string(json.stringify(classes_dict, "\t"));
-	f->close();
+	Ref<FileAccess> f = FileAccess::open(p_output_file, FileAccess::WRITE);
+	ERR_FAIL_COND_MSG(f.is_null(), "Cannot open file '" + p_output_file + "'.");
+	f->store_string(JSON::stringify(classes_dict, "\t"));
 
 	print_line(String() + "ClassDB API JSON written to: " + ProjectSettings::get_singleton()->globalize_path(p_output_file));
 }
 
-#endif // DEBUG_METHODS_ENABLED
+#endif // DEBUG_ENABLED

@@ -102,6 +102,10 @@ hb_ot_color_has_layers (hb_face_t *face);
  *
  * Pairs of glyph and color index.
  *
+ * A color index of 0xFFFF does not refer to a palette
+ * color, but indicates that the foreground color should
+ * be used.
+ *
  * Since: 2.1.0
  **/
 typedef struct hb_ot_color_layer_t {
@@ -116,12 +120,35 @@ hb_ot_color_glyph_get_layers (hb_face_t           *face,
 			      unsigned int        *layer_count, /* IN/OUT.  May be NULL. */
 			      hb_ot_color_layer_t *layers /* OUT.     May be NULL. */);
 
+/* COLRv1 */
+
+HB_EXTERN hb_bool_t
+hb_ot_color_has_paint (hb_face_t *face);
+
+HB_EXTERN hb_bool_t
+hb_ot_color_glyph_has_paint (hb_face_t      *face,
+                             hb_codepoint_t  glyph);
+
 /*
  * SVG
  */
 
 HB_EXTERN hb_bool_t
 hb_ot_color_has_svg (hb_face_t *face);
+
+HB_EXTERN unsigned int
+hb_ot_color_get_svg_document_count (hb_face_t *face);
+
+HB_EXTERN hb_bool_t
+hb_ot_color_glyph_get_svg_document_index (hb_face_t      *face,
+                                          hb_codepoint_t  glyph,
+                                          unsigned int   *svg_document_index /* OUT */);
+
+HB_EXTERN hb_bool_t
+hb_ot_color_get_svg_document_glyph_range (hb_face_t      *face,
+                                          unsigned int    svg_document_index,
+                                          hb_codepoint_t *start_glyph_id, /* OUT */
+                                          hb_codepoint_t *end_glyph_id /* OUT */);
 
 HB_EXTERN hb_blob_t *
 hb_ot_color_glyph_reference_svg (hb_face_t *face, hb_codepoint_t glyph);
